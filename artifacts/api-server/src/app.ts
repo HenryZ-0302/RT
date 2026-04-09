@@ -31,6 +31,7 @@ const PROXY_VERSION: string = (() => {
 
 // Stamp every response with the sanitized version — safe to set as HTTP header.
 app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader("X-Service-Version", PROXY_VERSION);
   res.setHeader("X-Proxy-Version", PROXY_VERSION);
   next();
 });

@@ -29,7 +29,7 @@
 - 或调用接口：
 ```bash
 curl https://你的域名/v1/models \
-  -H "Authorization: Bearer 你的PROXY_API_KEY"
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY"
 ```
 返回的 `friends` 列表中若全部为 `"down"` 则是此问题。
 
@@ -79,15 +79,15 @@ Claude 扩展思考模式、长文本生成有时需要数十秒。
 **症状：** 收到 `401 Unauthorized` 或 `"Invalid API key"` 错误。
 
 **检查清单：**
-1. `PROXY_API_KEY` 的值前后是否有多余空格
-2. 客户端填写的 API Key 是否和 `PROXY_API_KEY` **完全一致**（区分大小写）
+1. `SERVICE_ACCESS_KEY` 的值前后是否有多余空格
+2. 客户端填写的 API Key 是否和 `SERVICE_ACCESS_KEY` **完全一致**（区分大小写）
 3. 请求头格式是否正确：`Authorization: Bearer <你的密钥>`（Bearer 后面有空格）
-4. 朋友节点的 `PROXY_API_KEY` 是否和主代理一致
+4. 朋友节点的 `SERVICE_ACCESS_KEY` 是否和主代理一致
 
 **测试命令：**
 ```bash
 curl https://你的域名/v1/models \
-  -H "Authorization: Bearer 你的PROXY_API_KEY"
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY"
 # 返回模型列表 = 密钥正确
 # 返回 401 = 密钥错误
 ```
@@ -104,9 +104,9 @@ curl https://你的域名/v1/models \
 2. **直接测试朋友节点：**
 ```bash
 curl https://朋友的域名/v1/models \
-  -H "Authorization: Bearer 共用的PROXY_API_KEY"
+  -H "Authorization: Bearer 共用的SERVICE_ACCESS_KEY"
 ```
-3. 若返回 401：朋友的 `PROXY_API_KEY` 和你的不一致，让朋友检查 Secrets
+3. 若返回 401：朋友的 `SERVICE_ACCESS_KEY` 和你的不一致，让朋友检查 Secrets
 4. 若连接超时：朋友的服务可能未启动或域名有误
 5. 若一切正常但主代理仍显示 down：重启主代理 API Server，等待 30 秒重新探测
 
@@ -118,7 +118,7 @@ curl https://朋友的域名/v1/models \
 
 **检查清单：**
 1. Base URL 末尾**不要加斜杠**，正确格式：`https://你的域名`
-2. API Key 填写的是 `PROXY_API_KEY` 的值，不是 Replit 的账号密码
+2. API Key 填写的是 `SERVICE_ACCESS_KEY` 的值，不是 Replit 的账号密码
 3. 部分客户端会自动在 Base URL 后拼接 `/v1`，如果填写时已包含 `/v1` 则会变成 `/v1/v1` 导致失败
    - 正确：`https://你的域名`（不含 /v1）
    - 错误：`https://你的域名/v1`
@@ -127,7 +127,7 @@ curl https://朋友的域名/v1/models \
 ```bash
 # 将 <BASE_URL> 替换为你在客户端填写的地址
 curl <BASE_URL>/v1/models \
-  -H "Authorization: Bearer 你的PROXY_API_KEY"
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY"
 ```
 
 ---
@@ -218,7 +218,7 @@ app.use(express.json({ limit: "100mb" }));
 这是 500 最常见的原因。检查方法：
 ```bash
 curl https://你的域名/v1/chat/completions \
-  -H "Authorization: Bearer 你的PROXY_API_KEY" \
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
@@ -267,21 +267,21 @@ curl https://你的域名/api/healthz
 
 # 2. 检查模型列表（顺带验证鉴权）
 curl https://你的域名/v1/models \
-  -H "Authorization: Bearer 你的PROXY_API_KEY"
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY"
 
 # 3. 查看各节点用量统计
 curl https://你的域名/v1/stats \
-  -H "Authorization: Bearer 你的PROXY_API_KEY"
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY"
 
 # 4. 发一条最简单的测试消息（非流式）
 curl https://你的域名/v1/chat/completions \
-  -H "Authorization: Bearer 你的PROXY_API_KEY" \
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}],"stream":false}'
 
 # 5. 测试流式
 curl https://你的域名/v1/chat/completions \
-  -H "Authorization: Bearer 你的PROXY_API_KEY" \
+  -H "Authorization: Bearer 你的SERVICE_ACCESS_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```

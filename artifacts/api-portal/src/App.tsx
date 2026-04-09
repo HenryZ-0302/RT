@@ -3,6 +3,11 @@ import SetupWizard from "./components/SetupWizard";
 import UpdateBadge from "./components/UpdateBadge";
 import PageLogs from "./components/PageLogs";
 import PageDocs from "./components/PageDocs";
+import {
+  getStoredServiceKey,
+  servicePaths,
+  storeServiceKey,
+} from "./lib/service";
 
 // ---------------------------------------------------------------------------
 // Model registry
@@ -342,10 +347,10 @@ function PageHome({
               version: "v1.0.9",
               date: "2026-04-06",
               items: [
-                { zh: "配置助手弹窗逻辑修复：改为查询服务器是否已设置 PROXY_API_KEY，只在未完成初始化时才自动弹出；配置完成后无论换浏览器或清缓存均不再弹出", en: "Setup wizard no longer auto-pops on every load; now queries server setup status — only shows when PROXY_API_KEY is not yet configured" },
+                { zh: "配置助手弹窗逻辑修复：改为查询服务器是否已设置 SERVICE_ACCESS_KEY，只在未完成初始化时才自动弹出；配置完成后无论换浏览器或清缓存均不再弹出", en: "Setup wizard no longer auto-pops on every load; now queries server setup status — only shows when SERVICE_ACCESS_KEY is not yet configured" },
                 { zh: "更新方式改为「复制提示词给 Replit Agent」：点击版本徽标→「复制提示词」→粘贴到 Replit AI 对话框，由 Agent 自动拉取最新代码并重启", en: "Update flow changed to 'Copy prompt for Replit Agent': click version badge → copy prompt → paste in Replit AI chat; Agent handles pull + restart" },
                 { zh: "修复用量统计「刷新」按钮被上方元素遮挡无法点击的问题（去除 marginTop: -16px）", en: "Fix: stats refresh button was overlapped and unclickable due to negative margin; now properly positioned" },
-                { zh: "统计加载失败时区分错误类型：服务器未配置 PROXY_API_KEY（500）vs API Key 不正确（401），显示针对性提示", en: "Stats error messages now differentiate: 'PROXY_API_KEY not configured' (500) vs 'API Key mismatch' (401)" },
+                { zh: "统计加载失败时区分错误类型：服务器未配置 SERVICE_ACCESS_KEY（500）vs API Key 不正确（401），显示针对性提示", en: "Stats error messages now differentiate: 'SERVICE_ACCESS_KEY not configured' (500) vs 'API Key mismatch' (401)" },
               ],
             },
             {
@@ -384,7 +389,7 @@ function PageHome({
                 { zh: "配置助手重写：单步模式，一条指令完成所有初始化（Secret + AI Integrations + 重启），明确禁止 Agent 索取第三方 API Key", en: "SetupWizard rewrite: single-step prompt covers all init (Secret + AI Integrations + restart); forbids Agent from asking for third-party API keys" },
                 { zh: "版本比较修复：正确处理预发布后缀（a/b/rc1 等），stable > 同号 pre-release", en: "Version comparison fix: correctly handles pre-release suffixes (a/b/rc1…); stable > same-number pre-release" },
                 { zh: "子节点 URL 自动补全 /api 后缀（服务端路由层 + 前端统计页）", en: "Sub-node URL auto-normalization: auto-appends /api suffix in server routing and frontend Stats page" },
-                { zh: "X-Proxy-Version header 修复：过滤非 ASCII 字符，彻底解决 ERR_INVALID_CHAR 崩溃", en: "X-Proxy-Version header fix: strip non-ASCII chars, eliminating ERR_INVALID_CHAR crash" },
+                { zh: "X-Service-Version / X-Proxy-Version header 修复：过滤非 ASCII 字符，彻底解决 ERR_INVALID_CHAR 崩溃", en: "X-Service-Version / X-Proxy-Version header fix: strip non-ASCII chars, eliminating ERR_INVALID_CHAR crash" },
                 { zh: "后端批量管理：多选批量启用 / 禁用 / 删除", en: "Batch backend management: multi-select for bulk enable / disable / remove" },
               ],
             },
@@ -490,12 +495,12 @@ function PageHome({
       <Card>
         <SectionTitle>访问密码 & 设置</SectionTitle>
         <div style={{ marginBottom: "14px" }}>
-          <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "6px" }}>API Key（PROXY_API_KEY）</label>
+          <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "6px" }}>API Key（SERVICE_ACCESS_KEY）</label>
           <input
             type="password"
             value={apiKey}
-            onChange={(e) => { setApiKey(e.target.value); localStorage.setItem("proxy_api_key", e.target.value); }}
-            placeholder="输入你的 PROXY_API_KEY"
+            onChange={(e) => { setApiKey(e.target.value); storeServiceKey(e.target.value); }}
+            placeholder="输入你的 SERVICE_ACCESS_KEY"
             style={{
               width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.08)",
               borderRadius: "8px", padding: "8px 12px", color: "#e2e8f0",
@@ -653,7 +658,7 @@ function PageStats({
     `   （可在 Secrets 面板或 viewEnvVars() 中查看已占用的名称）\n\n` +
     `步骤 2：通过 Replit Secrets 面板为该空位添加 Secret，值填写子节点 Publish 后的站点地址：\n` +
     `   https://【填入你的子节点 Publish 后的站点】\n` +
-    `   示例：https://my-proxy.replit.app\n\n` +
+    `   示例：https://my-service.example.com\n\n` +
     `步骤 3：重启服务器（Shell 中执行重启，或点击 Replit Run 按钮）\n\n` +
     `说明：\n` +
     `• 地址只填根路径即可（无需加 /api），程序会自动补全\n` +
@@ -669,7 +674,7 @@ function PageStats({
 
   const resetStats = () => {
     setResetting(true);
-    fetch(`${baseUrl}/api/v1/admin/stats/reset`, {
+    fetch(`${baseUrl}/api/service/metrics/reset`, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
     }).then(() => { onRefresh(); setResetting(false); })
@@ -767,7 +772,7 @@ function PageStats({
       {!apiKey ? (
         <Card><p style={{ margin: 0, fontSize: "13px", color: "#475569" }}>请先在首页填入 API Key 后查看统计。</p></Card>
       ) : statsError === "server" ? (
-        <Card><p style={{ margin: 0, fontSize: "13px", color: "#f87171" }}>服务器未配置 PROXY_API_KEY — 请运行配置助手完成初始化。</p></Card>
+        <Card><p style={{ margin: 0, fontSize: "13px", color: "#f87171" }}>服务器未配置 SERVICE_ACCESS_KEY — 请运行配置助手完成初始化。</p></Card>
       ) : statsError === "auth" ? (
         <Card>
           <div style={{ fontSize: "13px", color: "#f87171", lineHeight: "1.7" }}>
@@ -777,7 +782,7 @@ function PageStats({
             </div>
             <div style={{ color: "#475569", fontSize: "12px", marginTop: "6px" }}>
               如果忘记了密码，请在 Replit 左侧边栏 <strong style={{ color: "#94a3b8" }}>&#128274; Secrets</strong> 面板中查看
-              <code style={{ color: "#a78bfa", fontFamily: "Menlo, monospace", marginLeft: "4px" }}>PROXY_API_KEY</code>
+              <code style={{ color: "#a78bfa", fontFamily: "Menlo, monospace", marginLeft: "4px" }}>SERVICE_ACCESS_KEY</code>
               的值，也可以重新运行配置助手修改密码。
             </div>
           </div>
@@ -1263,7 +1268,7 @@ function UpdateBar({ baseUrl, apiKey: _apiKey }: { baseUrl: string; apiKey: stri
 
   const check = useCallback(async () => {
     try {
-      const r = await fetch(`${baseUrl}/api/update/version`);
+      const r = await fetch(servicePaths.release(baseUrl));
       if (!r.ok) return;
       const d = await r.json();
       setHasUpdate(!!d.hasUpdate);
@@ -1279,9 +1284,9 @@ function UpdateBar({ baseUrl, apiKey: _apiKey }: { baseUrl: string; apiKey: stri
   }, [check]);
 
   const buildPrompt = (ver: string) =>
-    `请帮我把 AI 网关更新到最新版本 ${ver}。\n` +
-    `从 GitHub 仓库 https://github.com/Akatsuki03/Replit2Api 拉取最新代码，覆盖当前项目文件（无需保留原文件），` +
-    `然后运行 pnpm install，最后重启 "artifacts/api-server: API Server" 和 "artifacts/api-portal: web" 两个工作流。`;
+    `请帮我将 Unified Service Layer 更新到版本 ${ver}。\n` +
+    `从已配置的上游服务源同步最新文件，覆盖当前项目代码，然后运行 pnpm install，` +
+    `最后重启 "artifacts/api-server: API Server" 和 "artifacts/api-portal: web" 两个工作流。`;
 
   const copyPrompt = async () => {
     const text = buildPrompt(latestVer);
@@ -1369,7 +1374,7 @@ function UpdateBar({ baseUrl, apiKey: _apiKey }: { baseUrl: string; apiKey: stri
 // 上游版本检测地址改为 GitHub raw，子节点从 GitHub 拉取更新，无需上游 Replit 在线
 // ---------------------------------------------------------------------------
 
-const _UPSTREAM_VER_URL = "https://raw.githubusercontent.com/Akatsuki03/Replit2Api/main/version.json";
+const _UPSTREAM_VER_URL = "";
 
 interface FleetInstance {
   id: string;
@@ -1438,7 +1443,7 @@ function FleetManager() {
     if (!inst) return;
     patchInst(id, { status: "checking" });
     try {
-      const r = await fetch(`${inst.url}/api/update/version`, {
+      const r = await fetch(`${inst.url}/api/service/release`, {
         headers: { Authorization: `Bearer ${inst.key}` },
         signal: AbortSignal.timeout(10000),
       });
@@ -1465,7 +1470,7 @@ function FleetManager() {
     if (!inst) return;
     patchInst(id, { status: "updating", updateLog: null });
     try {
-      const r = await fetch(`${inst.url}/api/update/apply`, {
+      const r = await fetch(`${inst.url}/api/service/release/apply`, {
         method: "POST",
         headers: { Authorization: `Bearer ${inst.key}`, "Content-Type": "application/json" },
         signal: AbortSignal.timeout(60000),
@@ -1567,8 +1572,8 @@ function FleetManager() {
       <div style={{ marginBottom: "14px" }}>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
           <input style={{ ...inp, flex: "0 0 110px" }} placeholder="名称" value={addName} onChange={(e) => setAddName(e.target.value)} />
-          <input style={{ ...inp, flex: "2 1 180px" }} placeholder="https://your-proxy.replit.app（根地址）" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} />
-          <input type="password" style={{ ...inp, flex: "1 1 130px" }} placeholder="PROXY_API_KEY" value={addKey} onChange={(e) => setAddKey(e.target.value)} />
+          <input style={{ ...inp, flex: "2 1 180px" }} placeholder="https://your-service.example.com（根地址）" value={addUrl} onChange={(e) => setAddUrl(e.target.value)} />
+          <input type="password" style={{ ...inp, flex: "1 1 130px" }} placeholder="SERVICE_ACCESS_KEY" value={addKey} onChange={(e) => setAddKey(e.target.value)} />
           <button onClick={addInst} disabled={!addUrl || !addKey} style={{
             background: "rgba(99,102,241,0.7)", border: "1px solid rgba(99,102,241,0.6)",
             color: "#e0e7ff", borderRadius: "7px", padding: "7px 16px",
@@ -1671,9 +1676,9 @@ function PageEndpoints({ displayUrl, expandedGroups, onToggleGroup, totalModels 
         <SectionTitle>认证方式（三选一）</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           {[
-            { label: "Bearer Token（推荐，兼容所有 OpenAI 客户端）", code: `Authorization: Bearer YOUR_PROXY_API_KEY` },
-            { label: "x-goog-api-key Header（兼容 Gemini 格式客户端）", code: `x-goog-api-key: YOUR_PROXY_API_KEY` },
-            { label: "URL 查询参数（适合简单调试）", code: `${displayUrl}/v1/models?key=YOUR_PROXY_API_KEY` },
+            { label: "Bearer Token（推荐，兼容所有 OpenAI 客户端）", code: `Authorization: Bearer YOUR_SERVICE_ACCESS_KEY` },
+            { label: "x-goog-api-key Header（兼容 Gemini 格式客户端）", code: `x-goog-api-key: YOUR_SERVICE_ACCESS_KEY` },
+            { label: "URL 查询参数（适合简单调试）", code: `${displayUrl}/v1/models?key=YOUR_SERVICE_ACCESS_KEY` },
           ].map((auth) => (
             <div key={auth.label}>
               <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>{auth.label}</div>
@@ -1691,7 +1696,7 @@ function PageEndpoints({ displayUrl, expandedGroups, onToggleGroup, totalModels 
         </p>
         <CodeBlock
           code={`curl ${displayUrl}/v1/chat/completions \\
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY" \\
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "gpt-4.1-mini",
@@ -1726,14 +1731,14 @@ function PageEndpoints({ displayUrl, expandedGroups, onToggleGroup, totalModels 
         <SectionTitle>快速测试</SectionTitle>
         <CodeBlock
           code={`curl ${displayUrl}/v1/models \\
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY"`}
-          copyText={`curl ${displayUrl}/v1/models \\\n  -H "Authorization: Bearer YOUR_PROXY_API_KEY"`}
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY"`}
+          copyText={`curl ${displayUrl}/v1/models \\\n  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY"`}
         />
         <div style={{ marginTop: "14px" }}>
           <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>流式输出测试：</div>
           <CodeBlock
             code={`curl ${displayUrl}/v1/chat/completions \\
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY" \\
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Hello!"}],"stream":true}'`}
           />
@@ -1773,7 +1778,7 @@ function PageEndpoints({ displayUrl, expandedGroups, onToggleGroup, totalModels 
               step: 3, title: "填写 Base URL 和 API Key",
               desc: (
                 <span>
-                  Base URL 填入生产环境域名，API Key 填入 <code style={{ color: "#a78bfa", background: "rgba(167,139,250,0.1)", padding: "1px 5px", borderRadius: "4px" }}>PROXY_API_KEY</code>。
+                  Base URL 填入生产环境域名，API Key 填入 <code style={{ color: "#a78bfa", background: "rgba(167,139,250,0.1)", padding: "1px 5px", borderRadius: "4px" }}>SERVICE_ACCESS_KEY</code>。
                   <div style={{ marginTop: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
                     <span style={{ fontSize: "12px", color: "#475569", flexShrink: 0 }}>当前地址</span>
                     <code style={{ flex: 1, color: "#a78bfa", fontSize: "12px", fontFamily: "Menlo, monospace", overflow: "hidden", textOverflow: "ellipsis" }}>{displayUrl}</code>
@@ -2010,11 +2015,8 @@ export default function App() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [sillyTavernMode, setSillyTavernMode] = useState(false);
   const [stLoading, setStLoading] = useState(true);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("proxy_api_key") ?? "");
+  const [apiKey, setApiKey] = useState(() => getStoredServiceKey());
   const [showWizard, setShowWizard] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    openai: false, anthropic: false, gemini: false, openrouter: false,
-  });
   const [stats, setStats] = useState<Record<string, BackendStat> | null>(null);
   const [modelStats, setModelStats] = useState<Record<string, ModelStat> | null>(null);
   const [statsError, setStatsError] = useState<false | "auth" | "server">(false);
@@ -2027,19 +2029,17 @@ export default function App() {
 
   const baseUrl = window.location.origin;
   const displayUrl: string = (import.meta.env.VITE_BASE_URL as string | undefined) ?? window.location.origin;
-  const totalModels = OPENAI_MODELS.length + ANTHROPIC_MODELS.length + GEMINI_MODELS.length + OPENROUTER_MODELS.length;
-
   const checkHealth = useCallback(async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/healthz`, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(servicePaths.status(baseUrl), { signal: AbortSignal.timeout(5000) });
       setOnline(res.ok);
     } catch { setOnline(false); }
   }, [baseUrl]);
 
   const fetchSTMode = useCallback(async () => {
     try {
-      const key = localStorage.getItem("proxy_api_key") ?? "";
-      const res = await fetch(`${baseUrl}/api/settings/sillytavern`, {
+      const key = getStoredServiceKey();
+      const res = await fetch(servicePaths.compatibility(baseUrl), {
         headers: key ? { Authorization: `Bearer ${key}` } : {},
       });
       if (res.ok) { const d = await res.json(); setSillyTavernMode(d.enabled); }
@@ -2051,7 +2051,7 @@ export default function App() {
     const newVal = !sillyTavernMode;
     setSillyTavernMode(newVal);
     try {
-      const res = await fetch(`${baseUrl}/api/settings/sillytavern`, {
+      const res = await fetch(servicePaths.compatibility(baseUrl), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
         body: JSON.stringify({ enabled: newVal }),
@@ -2063,7 +2063,7 @@ export default function App() {
   const fetchStats = useCallback(async (key: string) => {
     if (!key) { setStats(null); setModelStats(null); setStatsError(false); return; }
     try {
-      const r = await fetch(`${baseUrl}/api/v1/stats`, { headers: { Authorization: `Bearer ${key}` } });
+      const r = await fetch(servicePaths.metrics(baseUrl), { headers: { Authorization: `Bearer ${key}` } });
       if (!r.ok) {
         setStatsError(r.status === 500 ? "server" : "auth");
         return;
@@ -2085,7 +2085,7 @@ export default function App() {
     if (!url) return;
     setAddState("loading");
     try {
-      const r = await fetch(`${baseUrl}/api/v1/admin/backends`, {
+      const r = await fetch(servicePaths.backends(baseUrl), {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -2099,7 +2099,7 @@ export default function App() {
   };
 
   const removeBackend = async (label: string) => {
-    await fetch(`${baseUrl}/api/v1/admin/backends/${label}`, {
+    await fetch(servicePaths.backend(baseUrl, label), {
       method: "DELETE",
       headers: { Authorization: `Bearer ${apiKey}` },
     });
@@ -2107,7 +2107,7 @@ export default function App() {
   };
 
   const toggleBackend = async (label: string, enabled: boolean) => {
-    await fetch(`${baseUrl}/api/v1/admin/backends/${label}`, {
+    await fetch(servicePaths.backend(baseUrl, label), {
       method: "PATCH",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ enabled }),
@@ -2116,7 +2116,7 @@ export default function App() {
   };
 
   const batchToggleBackends = async (labels: string[], enabled: boolean) => {
-    await fetch(`${baseUrl}/api/v1/admin/backends`, {
+    await fetch(servicePaths.backends(baseUrl), {
       method: "PATCH",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ labels, enabled }),
@@ -2127,7 +2127,7 @@ export default function App() {
   const toggleRouting = async (field: "localEnabled" | "localFallback" | "fakeStream", value: boolean) => {
     setRouting((prev) => ({ ...prev, [field]: value }));
     try {
-      await fetch(`${baseUrl}/api/v1/admin/routing`, {
+      await fetch(servicePaths.routing(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
@@ -2138,7 +2138,7 @@ export default function App() {
   const fetchModels = useCallback(async (key: string = apiKey) => {
     if (!key) return;
     try {
-      const r = await fetch(`${baseUrl}/api/v1/admin/models`, { headers: { Authorization: `Bearer ${key}` } });
+      const r = await fetch(servicePaths.models(baseUrl), { headers: { Authorization: `Bearer ${key}` } });
       if (!r.ok) return;
       const d = await r.json();
       setModelStatus(d.models ?? []);
@@ -2155,7 +2155,7 @@ export default function App() {
       return { ...prev, [provider]: { total: grp.total, enabled: enabled ? grp.total : 0 } };
     });
     try {
-      await fetch(`${baseUrl}/api/v1/admin/models`, {
+      await fetch(servicePaths.models(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ provider, enabled }),
@@ -2176,7 +2176,7 @@ export default function App() {
       return { ...prev, [m.provider]: { total: grp.total, enabled: Math.max(0, Math.min(grp.total, grp.enabled + delta)) } };
     });
     try {
-      await fetch(`${baseUrl}/api/v1/admin/models`, {
+      await fetch(servicePaths.models(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [id], enabled }),
@@ -2187,7 +2187,7 @@ export default function App() {
 
   const batchRemoveBackends = async (labels: string[]) => {
     await Promise.all(labels.map((l) =>
-      fetch(`${baseUrl}/api/v1/admin/backends/${l}`, {
+      fetch(servicePaths.backend(baseUrl, l), {
         method: "DELETE",
         headers: { Authorization: `Bearer ${apiKey}` },
       })
@@ -2205,12 +2205,11 @@ export default function App() {
     return () => { clearInterval(iv1); clearInterval(iv2); };
   }, [checkHealth, fetchSTMode, fetchStats, fetchModels, apiKey]);
 
-  // Auto-show wizard only when server is NOT configured yet.
-  // Once PROXY_API_KEY is set server-side, wizard never pops up automatically.
+  // Auto-show wizard only when the service access key is not configured yet.
   // Uses sessionStorage so a manual dismiss stays dismissed for this tab's lifetime.
   useEffect(() => {
     if (sessionStorage.getItem("wizard_dismissed") === "1") return;
-    fetch(`${baseUrl}/api/setup-status`)
+    fetch(servicePaths.bootstrap(baseUrl))
       .then((r) => r.ok ? r.json() : null)
       .then((status: { configured: boolean } | null) => {
         if (!status || status.configured) return;
@@ -2237,14 +2236,13 @@ export default function App() {
             setShowWizard(false);
             if (key) {
               setApiKey(key);
-              localStorage.setItem("proxy_api_key", key);
+              storeServiceKey(key);
             }
           }}
           onDismiss={() => { sessionStorage.setItem("wizard_dismissed", "1"); setShowWizard(false); }}
         />
       )}
 
-      <UpdateBar baseUrl={baseUrl} apiKey={apiKey} />
 
       <div style={{ maxWidth: "920px", margin: "0 auto", padding: "28px 24px 80px" }}>
 
@@ -2263,9 +2261,9 @@ export default function App() {
               boxShadow: "0 4px 16px rgba(99,102,241,0.3)",
             }}>&#9889;</div>
             <div>
-              <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#f1f5f9", letterSpacing: "-0.02em" }}>Replit2Api</h1>
+              <h1 style={{ margin: 0, fontSize: "22px", fontWeight: 700, color: "#f1f5f9", letterSpacing: "-0.02em" }}>Unified Service Layer</h1>
               <p style={{ color: "#64748b", margin: "2px 0 0", fontSize: "12.5px" }}>
-                AI Proxy Gateway · OpenAI / Anthropic / Gemini / OpenRouter
+                服务接入与运维门户
               </p>
             </div>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -2379,7 +2377,7 @@ export default function App() {
         )}
 
         <div style={{ marginTop: "32px", textAlign: "center", color: "#1e293b", fontSize: "12px" }}>
-          Powered by Replit AI Integrations · OpenAI · Anthropic · Gemini · OpenRouter
+          Unified Service Layer
         </div>
       </div>
     </div>

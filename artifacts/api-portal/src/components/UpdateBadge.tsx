@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { servicePaths } from "../lib/service";
 
 interface VersionInfo {
   version: string;
@@ -9,6 +10,7 @@ interface VersionInfo {
   latestReleaseNotes?: string;
   latestReleaseDate?: string;
   checkError?: string;
+  upstreamRepoUrl?: string;
 }
 
 interface Props {
@@ -16,7 +18,19 @@ interface Props {
   apiKey: string;
 }
 
-export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
+function buildAgentPrompt(latestVersion: string, upstreamRepoUrl?: string): string {
+  const sourceLine = upstreamRepoUrl
+    ? `从上游仓库 ${upstreamRepoUrl} 拉取最新代码，覆盖当前项目文件，`
+    : "从当前已配置的上游服务源同步最新代码并覆盖当前项目文件，";
+
+  return (
+    `请帮我把统一服务层更新到最新版本 ${latestVersion}。\n` +
+    sourceLine +
+    "然后运行 pnpm install，最后重启 \"artifacts/api-server: API Server\" 和 \"artifacts/api-portal: web\" 两个工作流。"
+  );
+}
+
+export default function UpdateBadge({ baseUrl }: Props) {
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -25,8 +39,8 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
 
   const fetchVersion = useCallback(async () => {
     try {
-      const r = await fetch(`${baseUrl}/api/update/version`);
-      if (r.ok) setInfo(await r.json());
+      const response = await fetch(servicePaths.release(baseUrl));
+      if (response.ok) setInfo(await response.json());
     } catch {}
   }, [baseUrl]);
 
@@ -34,8 +48,8 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
     setChecking(true);
     setCheckDone(false);
     try {
-      const r = await fetch(`${baseUrl}/api/update/version`);
-      if (r.ok) setInfo(await r.json());
+      const response = await fetch(servicePaths.release(baseUrl));
+      if (response.ok) setInfo(await response.json());
     } catch {}
     setChecking(false);
     setCheckDone(true);
@@ -44,36 +58,30 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
 
   useEffect(() => {
     fetchVersion();
-    const t = setInterval(fetchVersion, 5 * 60 * 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(fetchVersion, 5 * 60 * 1000);
+    return () => clearInterval(timer);
   }, [fetchVersion]);
-
-  const buildAgentPrompt = (latestVer: string) =>
-    `请帮我把 AI 网关更新到最新版本 ${latestVer}。\n` +
-    `从 GitHub 仓库 https://github.com/Akatsuki03/Replit2Api 拉取最新代码，覆盖当前项目文件（无需保留原文件），` +
-    `然后运行 pnpm install，最后重启 "artifacts/api-server: API Server" 和 "artifacts/api-portal: web" 两个工作流。`;
 
   const copyPrompt = async () => {
     if (!info?.latestVersion) return;
+    const text = buildAgentPrompt(info.latestVersion, info.upstreamRepoUrl);
+
     try {
-      await navigator.clipboard.writeText(buildAgentPrompt(info.latestVersion));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      await navigator.clipboard.writeText(text);
     } catch {
       const el = document.createElement("textarea");
-      el.value = buildAgentPrompt(info.latestVersion);
+      el.value = text;
       document.body.appendChild(el);
       el.select();
       document.execCommand("copy");
       document.body.removeChild(el);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
     }
+
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   if (!info) return null;
-
-  const hasUpdate = info.hasUpdate;
 
   return (
     <>
@@ -82,25 +90,30 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
         style={{
           display: "inline-flex", alignItems: "center", gap: "5px",
           padding: "3px 10px", borderRadius: "12px", fontFamily: "Menlo, monospace",
-          border: `1px solid ${hasUpdate ? "rgba(251,191,36,0.45)" : "rgba(255,255,255,0.1)"}`,
-          background: hasUpdate ? "rgba(251,191,36,0.1)" : "rgba(255,255,255,0.05)",
-          color: hasUpdate ? "#fbbf24" : "#475569",
+          border: `1px solid ${info.hasUpdate ? "rgba(251,191,36,0.45)" : "rgba(255,255,255,0.1)"}`,
+          background: info.hasUpdate ? "rgba(251,191,36,0.1)" : "rgba(255,255,255,0.05)",
+          color: info.hasUpdate ? "#fbbf24" : "#475569",
           fontSize: "11.5px", fontWeight: 600, cursor: "pointer", transition: "all 0.2s",
         }}
       >
-        {hasUpdate && (
+        {info.hasUpdate && (
           <span style={{
             width: "6px", height: "6px", borderRadius: "50%",
             background: "#fbbf24", flexShrink: 0, animation: "pulse 2s ease-in-out infinite",
           }} />
         )}
         v{info.version}
-        {hasUpdate && <span style={{ fontSize: "10px" }}>↑ {info.latestVersion}</span>}
+        {info.hasUpdate && <span style={{ fontSize: "10px" }}>to {info.latestVersion}</span>}
       </button>
 
       {open && (
         <div
-          onClick={(e) => { if (e.target === e.currentTarget) { setOpen(false); setCopied(false); } }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setOpen(false);
+              setCopied(false);
+            }
+          }}
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
             zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center",
@@ -109,12 +122,12 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
         >
           <div style={{
             background: "hsl(222,47%,12%)", border: "1px solid rgba(99,102,241,0.25)",
-            borderRadius: "16px", width: "100%", maxWidth: "500px",
+            borderRadius: "16px", width: "100%", maxWidth: "520px",
             padding: "24px", boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
           }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "20px" }}>
               <div>
-                <div style={{ fontWeight: 700, color: "#f1f5f9", fontSize: "15px" }}>AI 网关 版本信息</div>
+                <div style={{ fontWeight: 700, color: "#f1f5f9", fontSize: "15px" }}>统一服务层版本信息</div>
                 <div style={{ color: "#475569", fontSize: "12px", marginTop: "2px" }}>
                   当前版本 <span style={{ color: "#a5b4fc", fontFamily: "Menlo, monospace" }}>v{info.version}</span>
                 </div>
@@ -122,7 +135,9 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
               <button
                 onClick={() => { setOpen(false); setCopied(false); }}
                 style={{ background: "none", border: "none", color: "#334155", fontSize: "22px", cursor: "pointer" }}
-              >×</button>
+              >
+                x
+              </button>
             </div>
 
             {info.releaseNotes && (
@@ -135,34 +150,34 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
               </div>
             )}
 
-            {info.checkError && !hasUpdate && (
+            {info.checkError && !info.hasUpdate && (
               <div style={{
                 background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)",
                 borderRadius: "10px", padding: "12px 14px", marginBottom: "16px",
                 color: "#f87171", fontSize: "12.5px",
               }}>
-                版本检测失败：{info.checkError}
+                版本检测失败: {info.checkError}
               </div>
             )}
 
-            {!hasUpdate && !info.checkError && (
+            {!info.hasUpdate && !info.checkError && (
               <div style={{
                 background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.15)",
                 borderRadius: "10px", padding: "10px 14px", marginBottom: "16px",
                 color: "#86efac", fontSize: "12.5px",
               }}>
-                ✓ 已是最新版本
+                Already up to date.
               </div>
             )}
 
-            {hasUpdate && (
+            {info.hasUpdate && (
               <>
                 <div style={{
                   background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.25)",
                   borderRadius: "10px", padding: "14px", marginBottom: "14px",
                 }}>
                   <div style={{ color: "#fbbf24", fontSize: "12px", fontWeight: 700, marginBottom: "6px" }}>
-                    发现新版本 v{info.latestVersion}
+                    检测到新版本 v{info.latestVersion}
                     {info.latestReleaseDate && (
                       <span style={{ fontWeight: 400, color: "#92400e", marginLeft: "8px" }}>{info.latestReleaseDate}</span>
                     )}
@@ -179,7 +194,7 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
                   borderRadius: "10px", padding: "14px", marginBottom: "14px",
                 }}>
                   <div style={{ color: "#818cf8", fontSize: "11px", fontWeight: 700, marginBottom: "10px" }}>
-                    📋 更新方式 — 复制提示词 → 粘贴到 Replit AI 对话框
+                    平台更新助手
                   </div>
                   <pre style={{
                     margin: 0, padding: "10px 12px",
@@ -189,7 +204,7 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
                     fontFamily: "Menlo, Monaco, monospace",
                     maxHeight: "120px", overflowY: "auto",
                   }}>
-                    {buildAgentPrompt(info.latestVersion ?? "")}
+                    {buildAgentPrompt(info.latestVersion ?? "", info.upstreamRepoUrl)}
                   </pre>
                   <button
                     onClick={copyPrompt}
@@ -202,7 +217,7 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
                       fontSize: "13px", fontWeight: 600, cursor: "pointer", transition: "all 0.2s",
                     }}
                   >
-                    {copied ? "✓ 已复制到剪贴板！" : "复制提示词"}
+                    {copied ? "Copied to clipboard" : "复制更新指令"}
                   </button>
                 </div>
               </>
@@ -222,8 +237,8 @@ export default function UpdateBadge({ baseUrl, apiKey: _apiKey }: Props) {
                   transition: "all 0.2s",
                 }}
               >
-                {checking && <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⟳</span>}
-                {checking ? "检测中…" : checkDone ? "✓ 检测完成" : "重新检测"}
+                {checking && <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>o</span>}
+                {checking ? "检测中..." : checkDone ? "Check complete" : "重新检测"}
               </button>
             </div>
           </div>

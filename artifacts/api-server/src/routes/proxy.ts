@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { readJson, writeJson } from "../lib/cloudPersist";
+import { getServiceAccessKey } from "../lib/serviceConfig";
 import { getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
@@ -165,7 +166,7 @@ function normalizeSubNodeUrl(raw: string): string {
 }
 
 function getFriendProxyConfigs(): { label: string; url: string; apiKey: string }[] {
-  const apiKey = process.env.PROXY_API_KEY ?? "";
+  const apiKey = getServiceAccessKey() ?? "";
   const configs: { label: string; url: string; apiKey: string }[] = [];
 
   // Auto-scan FRIEND_PROXY_URL, FRIEND_PROXY_URL_2 … FRIEND_PROXY_URL_20 from env
@@ -187,7 +188,7 @@ function getFriendProxyConfigs(): { label: string; url: string; apiKey: string }
 
 // getAllFriendProxyConfigs — 返回全部节点（含禁用的），专供统计页面使用
 function getAllFriendProxyConfigs(): { label: string; url: string; apiKey: string; enabled: boolean }[] {
-  const apiKey = process.env.PROXY_API_KEY ?? "";
+  const apiKey = getServiceAccessKey() ?? "";
   const configs: { label: string; url: string; apiKey: string; enabled: boolean }[] = [];
 
   const envKeys = ["FRIEND_PROXY_URL", ...Array.from({ length: 19 }, (_, i) => `FRIEND_PROXY_URL_${i + 2}`)];
@@ -291,7 +292,7 @@ function makeLocalOpenAI(): OpenAI {
   const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
   if (!apiKey || !baseURL) {
     throw new Error(
-      "OpenAI integration is not configured. Please add the OpenAI integration in Replit (Tools → Integrations) to use GPT models."
+      "OpenAI integration is not configured. Please enable the platform OpenAI integration before using GPT models."
     );
   }
   return new OpenAI({ apiKey, baseURL });
@@ -302,7 +303,7 @@ function makeLocalAnthropic(): Anthropic {
   const baseURL = process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL;
   if (!apiKey || !baseURL) {
     throw new Error(
-      "Anthropic integration is not configured. Please add the Anthropic integration in Replit (Tools → Integrations) to use Claude models."
+      "Anthropic integration is not configured. Please enable the platform Anthropic integration before using Claude models."
     );
   }
   return new Anthropic({ apiKey, baseURL });
@@ -313,7 +314,7 @@ function makeLocalGemini(): GoogleGenAI {
   const baseUrl = process.env.AI_INTEGRATIONS_GEMINI_BASE_URL;
   if (!apiKey || !baseUrl) {
     throw new Error(
-      "Gemini integration is not configured. Please add the Gemini integration in Replit (Tools → Integrations) to use Gemini models."
+      "Gemini integration is not configured. Please enable the platform Gemini integration before using Gemini models."
     );
   }
   return new GoogleGenAI({ apiKey, httpOptions: { apiVersion: "", baseUrl } });
@@ -324,7 +325,7 @@ function makeLocalOpenRouter(): OpenAI {
   const baseURL = process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL;
   if (!apiKey || !baseURL) {
     throw new Error(
-      "OpenRouter integration is not configured. Please add the OpenRouter integration in Replit (Tools → Integrations) to use OpenRouter models."
+      "OpenRouter integration is not configured. Please enable the platform OpenRouter integration before using OpenRouter models."
     );
   }
   return new OpenAI({ apiKey, baseURL });
@@ -544,9 +545,9 @@ async function fakeStreamResponse(
 }
 
 function requireApiKey(req: Request, res: Response, next: () => void) {
-  const proxyKey = process.env.PROXY_API_KEY;
-  if (!proxyKey) {
-    res.status(500).json({ error: { message: "Server API key not configured", type: "server_error" } });
+  const serviceKey = getServiceAccessKey();
+  if (!serviceKey) {
+    res.status(500).json({ error: { message: "Service access key is not configured", type: "server_error" } });
     return;
   }
 
@@ -561,11 +562,11 @@ function requireApiKey(req: Request, res: Response, next: () => void) {
   }
 
   if (!providedKey) {
-    res.status(401).json({ error: { message: "Missing API key (provide Authorization: Bearer <key> or x-api-key header)", type: "invalid_request_error" } });
+    res.status(401).json({ error: { message: "Missing access key (provide Authorization: Bearer <key> or x-api-key header)", type: "invalid_request_error" } });
     return;
   }
-  if (providedKey !== proxyKey) {
-    res.status(401).json({ error: { message: "Invalid API key", type: "invalid_request_error" } });
+  if (providedKey !== serviceKey) {
+    res.status(401).json({ error: { message: "Invalid access key", type: "invalid_request_error" } });
     return;
   }
   next();
@@ -583,7 +584,7 @@ function requireApiKeyWithQuery(req: Request, res: Response, next: () => void) {
 // Routes
 // ---------------------------------------------------------------------------
 
-router.get("/v1/models", requireApiKey, (_req: Request, res: Response) => {
+function sendModelCatalog(_req: Request, res: Response) {
   const pool = buildBackendPool();
   const friendStatuses = getFriendProxyConfigs().map(({ label, url }) => ({
     label,
@@ -596,7 +597,7 @@ router.get("/v1/models", requireApiKey, (_req: Request, res: Response) => {
       id: m.id,
       object: "model",
       created: 1700000000,
-      owned_by: "replit-proxy",
+      owned_by: "service-layer",
       description: m.description,
     })),
     _meta: {
@@ -605,7 +606,11 @@ router.get("/v1/models", requireApiKey, (_req: Request, res: Response) => {
       friends: friendStatuses,
     },
   });
-});
+}
+
+for (const path of ["/v1/models", "/service/catalog"]) {
+  router.get(path, requireApiKey, sendModelCatalog);
+}
 
 // ---------------------------------------------------------------------------
 // Image format conversion: OpenAI image_url → Anthropic image
@@ -729,7 +734,7 @@ function convertMessagesForClaude(messages: OAIMessage[]): AnthropicMessage[] {
   return result;
 }
 
-router.post("/v1/chat/completions", requireApiKey, async (req: Request, res: Response) => {
+async function handleChatCompletions(req: Request, res: Response) {
   const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
     model?: string;
     messages: OAIMessage[];
@@ -741,7 +746,7 @@ router.post("/v1/chat/completions", requireApiKey, async (req: Request, res: Res
 
   // Reject disabled models early
   if (model && !isModelEnabled(model)) {
-    res.status(403).json({ error: { message: `Model '${model}' is disabled on this gateway`, type: "invalid_request_error", code: "model_disabled" } });
+    res.status(403).json({ error: { message: `Model '${model}' is disabled on this service`, type: "invalid_request_error", code: "model_disabled" } });
     return;
   }
 
@@ -760,11 +765,11 @@ router.post("/v1/chat/completions", requireApiKey, async (req: Request, res: Res
   const MAX_FRIEND_RETRIES = 3;
   const triedFriendUrls = new Set<string>();
   let backend = pickBackend();
-  if (!backend) { res.status(503).json({ error: { message: "No available backends — all sub-nodes are down and local fallback is disabled", type: "service_unavailable" } }); return; }
+  if (!backend) { res.status(503).json({ error: { message: "No available backends - all sub-nodes are down and local fallback is disabled", type: "service_unavailable" } }); return; }
 
   for (let attempt = 0; ; attempt++) {
     const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    req.log.info({ model: selectedModel, backend: backendLabel, attempt, counter: requestCounter - 1, sillyTavern: isClaudeModel && getSillyTavernMode(), toolCount: tools?.length ?? 0 }, "Proxy request");
+    req.log.info({ model: selectedModel, backend: backendLabel, attempt, counter: requestCounter - 1, sillyTavern: isClaudeModel && getSillyTavernMode(), toolCount: tools?.length ?? 0 }, "Service request");
 
     try {
       let result: { promptTokens: number; completionTokens: number; ttftMs?: number };
@@ -841,7 +846,7 @@ router.post("/v1/chat/completions", requireApiKey, async (req: Request, res: Res
         }
       }
 
-      req.log.error({ err }, "Proxy request failed");
+      req.log.error({ err }, "Service request failed");
       const errStatus = (err instanceof FriendProxyHttpError ? err.status : undefined) ?? 500;
       pushRequestLog({
         method: req.method, path: req.path, model: selectedModel,
@@ -859,14 +864,18 @@ router.post("/v1/chat/completions", requireApiKey, async (req: Request, res: Res
       break;
     }
   }
-});
+}
+
+for (const path of ["/v1/chat/completions", "/service/chat"]) {
+  router.post(path, requireApiKey, handleChatCompletions);
+}
 
 // ---------------------------------------------------------------------------
 // Anthropic-native /v1/messages endpoint
 // Accepts Anthropic API format directly (for clients like Cherry Studio, Claude.ai compatible tools)
 // ---------------------------------------------------------------------------
 
-router.post("/v1/messages", requireApiKey, async (req: Request, res: Response) => {
+async function handleAnthropicMessages(req: Request, res: Response) {
   const body = req.body as {
     model?: string;
     messages: AnthropicMessage[];
@@ -962,7 +971,11 @@ router.post("/v1/messages", requireApiKey, async (req: Request, res: Response) =
       res.end();
     }
   }
-});
+}
+
+for (const path of ["/v1/messages", "/service/messages"]) {
+  router.post(path, requireApiKey, handleAnthropicMessages);
+}
 
 // ---------------------------------------------------------------------------
 // Real-time request log ring buffer + SSE
@@ -999,11 +1012,11 @@ export function pushRequestLog(entry: Omit<RequestLog, "id" | "time">): void {
   }
 }
 
-router.get("/v1/admin/logs", requireApiKey, (_req: Request, res: Response) => {
+function sendLogs(_req: Request, res: Response) {
   res.json({ logs: requestLogs });
-});
+}
 
-router.get("/v1/admin/logs/stream", requireApiKeyWithQuery, (req: Request, res: Response) => {
+function streamLogs(req: Request, res: Response) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -1016,9 +1029,9 @@ router.get("/v1/admin/logs/stream", requireApiKeyWithQuery, (req: Request, res: 
     if (!res.writableEnded) res.write(": heartbeat\n\n");
   }, 20000);
   req.on("close", () => { clearInterval(heartbeat); logSSEClients.delete(res); });
-});
+}
 
-router.get("/v1/stats", requireApiKey, (_req: Request, res: Response) => {
+function sendMetrics(_req: Request, res: Response) {
   const allConfigs = getAllFriendProxyConfigs();
   const allLabels = ["local", ...allConfigs.map((c) => c.label)];
   const result: Record<string, unknown> = {};
@@ -1042,21 +1055,37 @@ router.get("/v1/stats", requireApiKey, (_req: Request, res: Response) => {
   }
   const modelStats: Record<string, ModelStat> = Object.fromEntries(modelStatsMap.entries());
   res.json({ stats: result, modelStats, uptimeSeconds: Math.round(process.uptime()), routing: routingSettings });
-});
+}
 
-router.post("/v1/admin/stats/reset", requireApiKey, (_req: Request, res: Response) => {
+function resetMetrics(_req: Request, res: Response) {
   statsMap.clear();
   modelStatsMap.clear();
   scheduleSave();
   res.json({ ok: true });
-});
+}
+
+for (const path of ["/v1/admin/logs", "/service/logs"]) {
+  router.get(path, requireApiKey, sendLogs);
+}
+
+for (const path of ["/v1/admin/logs/stream", "/service/logs/stream"]) {
+  router.get(path, requireApiKeyWithQuery, streamLogs);
+}
+
+for (const path of ["/v1/stats", "/service/metrics"]) {
+  router.get(path, requireApiKey, sendMetrics);
+}
+
+for (const path of ["/v1/admin/stats/reset", "/service/metrics/reset"]) {
+  router.post(path, requireApiKey, resetMetrics);
+}
 
 // ---------------------------------------------------------------------------
 // Admin: manage dynamic backends at runtime (no restart / redeploy required)
 // ---------------------------------------------------------------------------
 
-router.get("/v1/admin/backends", requireApiKey, (_req: Request, res: Response) => {
-  const apiKey = process.env.PROXY_API_KEY ?? "";
+function listBackends(_req: Request, res: Response) {
+  const apiKey = getServiceAccessKey() ?? "";
   const envConfigs = (() => {
     const list: { label: string; url: string }[] = [];
     const envKeys = ["FRIEND_PROXY_URL", ...Array.from({ length: 19 }, (_, i) => `FRIEND_PROXY_URL_${i + 2}`)];
@@ -1069,9 +1098,9 @@ router.get("/v1/admin/backends", requireApiKey, (_req: Request, res: Response) =
     dynamic: dynamicBackends.map((d) => ({ ...d, source: "dynamic", health: getCachedHealth(d.url) === false ? "down" : "healthy" })),
     apiKey,
   });
-});
+}
 
-router.post("/v1/admin/backends", requireApiKey, (req: Request, res: Response) => {
+function createBackend(req: Request, res: Response) {
   const { url } = req.body as { url?: string };
   if (!url || typeof url !== "string" || !url.startsWith("http")) {
     res.status(400).json({ error: "Valid https URL required" });
@@ -1084,22 +1113,22 @@ router.post("/v1/admin/backends", requireApiKey, (req: Request, res: Response) =
   const label = `DYNAMIC_${dynamicBackends.length + 1}`;
   dynamicBackends.push({ label, url: cleanUrl });
   saveDynamicBackends(dynamicBackends);
-  const apiKey = process.env.PROXY_API_KEY ?? "";
+  const apiKey = getServiceAccessKey() ?? "";
   probeHealth(normalizedUrl, apiKey).then((ok) => setHealth(normalizedUrl, ok)).catch(() => setHealth(normalizedUrl, false));
   res.json({ label, url: cleanUrl, source: "dynamic" });
-});
+}
 
-router.delete("/v1/admin/backends/:label", requireApiKey, (req: Request, res: Response) => {
+function deleteBackend(req: Request, res: Response) {
   const { label } = req.params;
   const before = dynamicBackends.length;
   dynamicBackends = dynamicBackends.filter((d) => d.label !== label);
   if (dynamicBackends.length === before) { res.status(404).json({ error: "Dynamic backend not found" }); return; }
   saveDynamicBackends(dynamicBackends);
   res.json({ deleted: true, label });
-});
+}
 
 // PATCH /v1/admin/backends/:label — 切换单个节点启用/禁用
-router.patch("/v1/admin/backends/:label", requireApiKey, (req: Request, res: Response) => {
+function updateBackend(req: Request, res: Response) {
   const { label } = req.params;
   const { enabled } = req.body as { enabled?: boolean };
   if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) required" }); return; }
@@ -1108,10 +1137,10 @@ router.patch("/v1/admin/backends/:label", requireApiKey, (req: Request, res: Res
   target.enabled = enabled;
   saveDynamicBackends(dynamicBackends);
   res.json({ label, enabled });
-});
+}
 
 // PATCH /v1/admin/backends — 批量切换（labels 数组 + enabled 布尔值）
-router.patch("/v1/admin/backends", requireApiKey, (req: Request, res: Response) => {
+function batchUpdateBackends(req: Request, res: Response) {
   const { labels, enabled } = req.body as { labels?: string[]; enabled?: boolean };
   if (!Array.isArray(labels) || typeof enabled !== "boolean") {
     res.status(400).json({ error: "labels (string[]) and enabled (boolean) required" });
@@ -1124,27 +1153,43 @@ router.patch("/v1/admin/backends", requireApiKey, (req: Request, res: Response) 
   }
   saveDynamicBackends(dynamicBackends);
   res.json({ updated, enabled });
-});
+}
 
-router.get("/v1/admin/routing", requireApiKey, (_req: Request, res: Response) => {
+for (const path of ["/v1/admin/backends", "/service/backends"]) {
+  router.get(path, requireApiKey, listBackends);
+  router.post(path, requireApiKey, createBackend);
+  router.patch(path, requireApiKey, batchUpdateBackends);
+}
+
+for (const path of ["/v1/admin/backends/:label", "/service/backends/:label"]) {
+  router.delete(path, requireApiKey, deleteBackend);
+  router.patch(path, requireApiKey, updateBackend);
+}
+
+function getRouting(_req: Request, res: Response) {
   res.json(routingSettings);
-});
+}
 
-router.patch("/v1/admin/routing", requireApiKey, (req: Request, res: Response) => {
+function updateRouting(req: Request, res: Response) {
   const { localEnabled, localFallback, fakeStream } = req.body as Partial<RoutingSettings>;
   if (typeof localEnabled === "boolean") routingSettings.localEnabled = localEnabled;
   if (typeof localFallback === "boolean") routingSettings.localFallback = localFallback;
   if (typeof fakeStream === "boolean") routingSettings.fakeStream = fakeStream;
   saveRoutingSettings();
   res.json(routingSettings);
-});
+}
+
+for (const path of ["/v1/admin/routing", "/service/routing"]) {
+  router.get(path, requireApiKey, getRouting);
+  router.patch(path, requireApiKey, updateRouting);
+}
 
 // ---------------------------------------------------------------------------
 // Admin: model enable/disable management
 // ---------------------------------------------------------------------------
 
 // GET /v1/admin/models — list all models with provider + enabled status
-router.get("/v1/admin/models", requireApiKey, (_req: Request, res: Response) => {
+function listModels(_req: Request, res: Response) {
   const models = ALL_MODELS.map((m) => ({
     id: m.id,
     provider: MODEL_PROVIDER_MAP.get(m.id) ?? "openrouter",
@@ -1157,11 +1202,11 @@ router.get("/v1/admin/models", requireApiKey, (_req: Request, res: Response) => 
     if (m.enabled) summary[m.provider].enabled++;
   }
   res.json({ models, summary });
-});
+}
 
 // PATCH /v1/admin/models — bulk enable/disable by ids or by provider
 // Body: { ids?: string[], provider?: string, enabled: boolean }
-router.patch("/v1/admin/models", requireApiKey, (req: Request, res: Response) => {
+function updateModels(req: Request, res: Response) {
   const { ids, provider, enabled } = req.body as { ids?: string[]; provider?: string; enabled?: boolean };
   if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) required" }); return; }
 
@@ -1180,7 +1225,12 @@ router.patch("/v1/admin/models", requireApiKey, (req: Request, res: Response) =>
   }
   saveDisabledModels(disabledModels);
   res.json({ updated: targets.length, enabled, ids: targets });
-});
+}
+
+for (const path of ["/v1/admin/models", "/service/models"]) {
+  router.get(path, requireApiKey, listModels);
+  router.patch(path, requireApiKey, updateModels);
+}
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -1229,7 +1279,7 @@ async function handleFriendProxy({
     });
     if (!fetchRes.ok) {
       const errText = await fetchRes.text().catch(() => "unknown");
-      throw new FriendProxyHttpError(fetchRes.status, `Friend proxy error ${fetchRes.status}: ${errText}`);
+      throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
     }
     const json = await fetchRes.json() as Record<string, unknown>;
     res.json(json);
@@ -1258,7 +1308,7 @@ async function handleFriendProxy({
 
   if (!fetchRes.ok) {
     const errText = await fetchRes.text().catch(() => "unknown");
-    throw new FriendProxyHttpError(fetchRes.status, `Friend proxy error ${fetchRes.status}: ${errText}`);
+    throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
   }
 
   const contentType = fetchRes.headers.get("content-type") ?? "";

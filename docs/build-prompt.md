@@ -1,4 +1,4 @@
-# AI Proxy Gateway — Complete Build & Deployment Guide
+# Unified Service Layer — Complete Build & Deployment Guide
 
 > This document describes the full architecture and contains a copy-pasteable Replit Agent prompt to reproduce this project from scratch.
 
@@ -37,7 +37,7 @@ Both bind to `$PORT` (assigned automatically by Replit per artifact).
 
 | Key | Purpose |
 |---|---|
-| `PROXY_API_KEY` | Shared auth key for all proxy clients |
+| `SERVICE_ACCESS_KEY` | Shared auth key for all service clients |
 | `SESSION_SECRET` | Express session signing |
 
 ### Environment Variables (shared)
@@ -133,7 +133,7 @@ Auth required. Removes a dynamic backend by label.
 
 ### Authentication Middleware
 
-Accepts `PROXY_API_KEY` via:
+Accepts `SERVICE_ACCESS_KEY` via:
 1. `Authorization: Bearer <key>` — recommended
 2. `x-goog-api-key: <key>` — Gemini-format clients
 3. `?key=<key>` — URL query parameter
@@ -381,12 +381,12 @@ Enable both Replit AI integrations (OpenAI + Anthropic) in project settings.
 They inject: AI_INTEGRATIONS_OPENAI_API_KEY, AI_INTEGRATIONS_OPENAI_BASE_URL,
 AI_INTEGRATIONS_ANTHROPIC_API_KEY, AI_INTEGRATIONS_ANTHROPIC_BASE_URL.
 
-Secrets: PROXY_API_KEY (auth key for all clients), SESSION_SECRET.
+Secrets: SERVICE_ACCESS_KEY (auth key for all clients), SESSION_SECRET.
 Env: FRIEND_PROXY_URL, FRIEND_PROXY_URL_2 … FRIEND_PROXY_URL_20 (friend node base URLs).
 Env: VITE_BASE_URL = https://your-app.replit.app (your deployed URL, shown in portal).
 
 ── Auth middleware ──
-Accept PROXY_API_KEY via: Authorization Bearer header, x-goog-api-key header, ?key= query param.
+Accept SERVICE_ACCESS_KEY via: Authorization Bearer header, x-goog-api-key header, ?key= query param.
 Return 401 if missing/wrong.
 
 ── Routes ──
@@ -406,7 +406,7 @@ Build on every request:
 4. Fallback to local-only if pool is empty
 Round-robin: counter++ % pool.length
 
-Health check each friend: GET /v1/models with Bearer PROXY_API_KEY, 5s timeout.
+Health check each friend: GET /v1/models with Bearer SERVICE_ACCESS_KEY, 5s timeout.
 Cache result 30s. Run on startup (+2s) + every 30s via setInterval.
 On network error during real request → immediately mark that friend as down.
 
@@ -513,7 +513,7 @@ Use displayUrl for all text/copy shown to users. Use baseUrl for all fetch() cal
 ── Page sections (top to bottom) ──
 
 1. Header
-   Purple gradient logo box (⚡ emoji), "AI Proxy Gateway" h1.
+   Purple gradient logo box (⚡ emoji), "Unified Service Layer" h1.
    Status badge (right-aligned): polls GET /api/healthz every 30s.
    States: green "在线" / red "离线" / grey "检测中".
 
@@ -541,7 +541,7 @@ Use displayUrl for all text/copy shown to users. Use baseUrl for all fetch() cal
 9. SillyTavern setup guide — numbered steps for Base URL + API key config.
 
 10. Stats panel
-    API key input (persist to localStorage "proxy_api_key").
+    API key input (persist to localStorage "service_access_key").
     Polls GET /v1/stats every 15s when key is entered.
     Per-backend: calls, errors, prompt/completion tokens, avg latency, avg TTFT, health dot.
 
@@ -558,16 +558,16 @@ Use displayUrl for all text/copy shown to users. Use baseUrl for all fetch() cal
 ### SillyTavern
 - Connection type: **OpenAI**
 - Base URL: `https://your-app.replit.app`
-- API Key: your `PROXY_API_KEY`
+- API Key: your `SERVICE_ACCESS_KEY`
 
 ### CherryStudio / any OpenAI-compatible client
 - API Base URL: `https://your-app.replit.app/v1`
-- API Key: your `PROXY_API_KEY`
+- API Key: your `SERVICE_ACCESS_KEY`
 
 ### curl — Chat
 ```bash
 curl https://your-app.replit.app/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY" \
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4.1","messages":[{"role":"user","content":"Hello"}]}'
 ```
@@ -575,14 +575,14 @@ curl https://your-app.replit.app/v1/chat/completions \
 ### curl — List models
 ```bash
 curl https://your-app.replit.app/v1/models \
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY"
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY"
 ```
 
 ### curl — Add a friend node
 ```bash
 curl https://your-app.replit.app/v1/admin/backends \
   -X POST \
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY" \
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://friend-proxy.replit.app"}'
 ```
@@ -590,7 +590,7 @@ curl https://your-app.replit.app/v1/admin/backends \
 ### curl — View stats
 ```bash
 curl https://your-app.replit.app/v1/stats \
-  -H "Authorization: Bearer YOUR_PROXY_API_KEY"
+  -H "Authorization: Bearer YOUR_SERVICE_ACCESS_KEY"
 ```
 
 ---
