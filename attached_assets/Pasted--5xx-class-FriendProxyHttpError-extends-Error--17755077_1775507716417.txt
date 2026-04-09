@@ -1,0 +1,164 @@
+以下是完整的子节点请求 + 用量采集代码，三部分：
+
+① 自定义错误类（区分 5xx 和网络错误）
+
+class FriendProxyHttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+② handleFriendProxy — 转发请求并提取 token 用量
+
+// 使用原生 fetch（不经过 SDK）确保能可靠捕获 chunk.usage，
+// 不受子节点 SDK 版本或 SSE 格式差异影响
+async function handleFriendProxy({
+  req, res, backend, model, messages, stream, maxTokens, startTime,
+}: {
+  req: Request;
+  res: Response;
+  backend: Extract<Backend, { kind: "friend" }>;
+  model: string;
+  messages: OAIMessage[];
+  stream: boolean;
+  maxTokens?: number;
+  startTime: number;
+}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
+  const body: Record<string, unknown> = { model, messages, stream };
+  body["max_tokens"] = maxTokens ?? 16000; // 覆盖子节点可能的低默认值
+  if (stream) body["stream_options"] = { include_usage: true };
+  const fetchRes = await fetch(`${backend.url}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${backend.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!fetchRes.ok) {
+    const errText = await fetchRes.text().catch(() => "unknown");
+    throw new FriendProxyHttpError(fetchRes.status, `Friend proxy error ${fetchRes.status}: ${errText}`);
+  }
+  // ── 流式 ──────────────────────────────────────────────────────────────────
+  if (stream) {
+    let promptTokens = 0, completionTokens = 0;
+    let ttftMs: number | undefined;
+    let outputChars = 0;
+    let headersCommitted = false;
+    const reader = fetchRes.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // 第一个 chunk 到达后再发 SSE 头，保留重试窗口
+        if (!headersCommitted) { setSseHeaders(res); headersCommitted = true; }
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trimEnd();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") { writeAndFlush(res, "data: [DONE]\n\n"); continue; }
+          try {
+            const chunk = JSON.parse(data) as Record<string, unknown>;
+            // 捕获 usage（任意带 usage 的 chunk 均可）
+            const usage = chunk["usage"] as { prompt_tokens?: number; completion_tokens?: number } | null | undefined;
+            if (usage && typeof usage === "object") {
+              promptTokens = usage.prompt_tokens ?? promptTokens;
+              completionTokens = usage.completion_tokens ?? completionTokens;
+            }
+            // 记录首 token 时延 + 累计输出字符（用于 fallback 估算）
+            const deltaContent = (chunk["choices"] as Array<{ delta?: { content?: string } }>)?.[0]?.delta?.content;
+            if (deltaContent) {
+              if (ttftMs === undefined) ttftMs = Date.now() - startTime;
+              outputChars += deltaContent.length;
+            }
+            writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
+          } catch { /* 跳过格式错误的 chunk */ }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    if (!headersCommitted) throw new Error("upstream closed before first payload (empty body)");
+    res.end();
+    // Fallback：子节点未返回 usage 时按字符数估算（约 4 字符 = 1 token）
+    if (promptTokens === 0) {
+      const inputChars = messages.reduce((acc, m) => {
+        if (typeof m.content === "string") return acc + m.content.length;
+        if (Array.isArray(m.content))
+          return acc + (m.content as Array<{ type: string; text?: string }>)
+            .filter(p => p.type === "text").reduce((a, p) => a + (p.text?.length ?? 0), 0);
+        return acc;
+      }, 0);
+      promptTokens = Math.ceil(inputChars / 4);
+      completionTokens = Math.ceil(outputChars / 4);
+    }
+    return { promptTokens, completionTokens, ttftMs };
+  }
+  // ── 非流式 ────────────────────────────────────────────────────────────────
+  const json = await fetchRes.json() as Record<string, unknown>;
+  res.json(json);
+  const usage = json["usage"] as { prompt_tokens?: number; completion_tokens?: number } | null | undefined;
+  const promptTokens = usage?.prompt_tokens ?? 0;
+  const completionTokens = usage?.completion_tokens ?? 0;
+  if (promptTokens === 0) {
+    const inputChars = messages.reduce((acc, m) => {
+      if (typeof m.content === "string") return acc + m.content.length;
+      if (Array.isArray(m.content))
+        return acc + (m.content as Array<{ type: string; text?: string }>)
+          .filter(p => p.type === "text").reduce((a, p) => a + (p.text?.length ?? 0), 0);
+      return acc;
+    }, 0);
+    const outputChars = (json["choices"] as Array<{ message?: { content?: string } }>)?.[0]?.message?.content?.length ?? 0;
+    return { promptTokens: Math.ceil(inputChars / 4), completionTokens: Math.ceil(outputChars / 4) };
+  }
+  return { promptTokens, completionTokens };
+}
+
+③ 路由调用处 — 记录用量 + 自动重试
+
+router.post("/v1/chat/completions", requireApiKey, async (req, res) => {
+  const { model, messages, stream, max_tokens } = req.body;
+  const startTime = Date.now();
+  const MAX_FRIEND_RETRIES = 3;
+  const triedFriendUrls = new Set<string>();
+  let backend = pickBackend();
+  for (let attempt = 0; ; attempt++) {
+    const backendLabel = backend.kind === "local" ? "Local" : backend.label;
+    try {
+      let result: { promptTokens: number; completionTokens: number; ttftMs?: number };
+      if (backend.kind === "friend") {
+        triedFriendUrls.add(backend.url);
+        result = await handleFriendProxy({ req, res, backend, model, messages, stream, maxTokens: max_tokens, startTime });
+      } else {
+        // ... handleClaude / handleOpenAI
+      }
+      // ✅ 成功：记录用量（自动防抖写盘）
+      recordCallStat(backendLabel, Date.now() - startTime, result.promptTokens, result.completionTokens, result.ttftMs);
+      break;
+    } catch (err: unknown) {
+      // ❌ 失败：记录错误 + 判断是否重试
+      recordErrorStat(backendLabel);
+      const is5xx = err instanceof FriendProxyHttpError && err.status >= 500;
+      const errMsg = err instanceof Error ? err.message : "";
+      const isNetworkErr = err instanceof TypeError
+        || ["fetch","aborted","terminated","closed","upstream","ECONNRESET","socket hang up","UND_ERR"]
+             .some(kw => errMsg.includes(kw));
+      if (backend.kind === "friend" && (is5xx || isNetworkErr)) {
+        setHealth(backend.url, false); // 标记不健康
+        if (attempt < MAX_FRIEND_RETRIES && !res.headersSent) {
+          const next = pickBackendExcluding(triedFriendUrls);
+          if (next?.kind === "friend") { backend = next; continue; } // 换节点重试
+        }
+      }
+      if (!res.headersSent)
+        res.status(500).json({ error: { message: errMsg || "Unknown error", type: "server_error" } });
+      break;
+    }
+  }
+});

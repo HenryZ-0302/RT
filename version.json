@@ -1,0 +1,6 @@
+{
+  "version": "1.1.7",
+  "name": "Replit2Api",
+  "releaseDate": "2026-04-08",
+  "releaseNotes": "v1.1.7 — 按模型定价计算开销，per-model token 统计，47 模型定价表"
+}
