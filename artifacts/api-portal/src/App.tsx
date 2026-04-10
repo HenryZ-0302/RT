@@ -256,11 +256,11 @@ function PageHome({
 }) {
   return (
     <>
-      {/* Changelog */}
+      {/* Current release notes */}
       <Card style={{ marginBottom: "20px", borderColor: "rgba(99,102,241,0.25)", background: "rgba(99,102,241,0.05)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
           <span style={{ fontSize: "15px" }}>📋</span>
-          <SectionTitle>更新日志 · Changelog</SectionTitle>
+          <SectionTitle>当前版本更新</SectionTitle>
         </div>
         {(() => {
           const releases = [
@@ -273,143 +273,6 @@ function PageHome({
                 { zh: "「按模型开销」卡片：统计面板第 6 格改为按模型维度展示费用排行，显示每个模型的调用次数和精确费用", en: "Per-model cost card: 6th summary card now shows cost breakdown by model (sorted by cost desc) with call count and precise cost" },
                 { zh: "定价覆盖：OpenAI GPT-5/4.1/4o/o-series、Anthropic Claude Opus/Sonnet/Haiku 4.x/3.x、Gemini 3.1/3/2.5/2.0/1.5、OpenRouter Grok/Llama/DeepSeek/Mistral/Qwen 等全部覆盖", en: "Pricing coverage: OpenAI GPT-5/4.1/4o/o-series, Anthropic Claude 4.x/3.x, Gemini 3.1–1.5, OpenRouter Grok/Llama/DeepSeek/Mistral/Qwen and more" },
                 { zh: "模型名智能匹配：自动剥离 provider 前缀（anthropic/、x-ai/ 等）和后缀（-thinking、-preview、日期戳），确保定价命中率", en: "Smart model name matching: strips provider prefixes and suffixes (-thinking, -preview, date stamps) for reliable pricing lookup" },
-              ],
-            },
-            {
-              version: "v1.1.6",
-              date: "2026-04-08",
-              items: [
-                { zh: "假流式支持：后端不支持流式或流式请求失败时，自动将完整 JSON 响应拆分为 SSE 流式输出，模拟逐字输出效果", en: "Fake streaming: when backends return JSON for stream requests or real streaming fails, automatically converts to SSE chunks with typewriter effect" },
-                { zh: "假流式开关：路由策略面板新增「假流式」开关，可独立启用/关闭，支持 API 控制和持久化", en: "Fake stream toggle: new switch in routing settings panel, controllable via API and persisted across restarts" },
-                { zh: "持久化竞态修复：路由设置、动态节点、禁用模型、统计数据全部在服务器启动前加载完成，彻底消除刷新页面后设置重置的问题", en: "Persistence race fix: routing settings, dynamic backends, disabled models, and stats are all loaded before server accepts requests — eliminates settings reset on page refresh" },
-                { zh: "写入错误不再静默吞掉，所有持久化失败均输出日志以便排查", en: "Write errors are no longer silently swallowed — all persistence failures are logged for debugging" },
-              ],
-            },
-            {
-              version: "v1.1.5",
-              date: "2026-04-07",
-              items: [
-                { zh: "子节点优先路由：有健康子节点时只在子节点间轮询，本地账号仅在所有子节点不可用时作为兜底，防止主账号余额耗尽拖垮整个轮询", en: "Friend-first routing: requests are round-robined across healthy friend nodes only; local backend is used as fallback only when all friends are down — prevents main account balance exhaustion from breaking the pool" },
-                { zh: "健康检查误标红修复：请求成功后立即将子节点标记为健康（不再仅依赖后台探测）；探测超时从 5 秒提升到 15 秒以适应 Replit 冷启动", en: "Health check false-red fix: successful requests immediately mark friend nodes as healthy; probe timeout raised from 5s to 15s to accommodate Replit cold starts" },
-                { zh: "添加节点时健康缓存 key 统一使用归一化 URL，修复 raw URL 与 normalized URL 不匹配导致的状态丢失", en: "Add-backend health cache now uses normalized URL as key, fixing cache miss caused by raw vs normalized URL mismatch" },
-                { zh: "配置助手提示词改为 setupReplitAIIntegrations() 编程接口，四个 provider 逐条执行，零歧义；禁止索取 Key 的声明覆盖全部四家", en: "Setup wizard prompt now uses setupReplitAIIntegrations() API calls for all 4 providers — sequential, unambiguous; API key ban text covers all four providers" },
-              ],
-            },
-            {
-              version: "v1.1.4",
-              date: "2026-04-07",
-              items: [
-                { zh: "Gemini 和 OpenRouter 接入 Replit 内置 AI Integrations：四大后端（OpenAI / Anthropic / Gemini / OpenRouter）全部使用平台原生集成，无需任何第三方 API Key", en: "Gemini & OpenRouter now use Replit built-in AI Integrations — all 4 backends (OpenAI / Anthropic / Gemini / OpenRouter) run natively, no third-party API keys needed" },
-                { zh: "Gemini 模型走 @google/genai SDK 原生调用，支持流式/非流式及 thinking 模式，自动进行 OpenAI ↔ Gemini 格式转换", en: "Gemini models routed via @google/genai SDK natively with full streaming, non-streaming, and thinking mode support; auto-converts between OpenAI and Gemini formats" },
-                { zh: "OpenRouter 模型复用 OpenAI SDK，指向 Replit OpenRouter 集成代理端点，无缝支持 Grok / Llama / DeepSeek / Mistral 等长尾模型", en: "OpenRouter models reuse OpenAI SDK pointed at Replit's OpenRouter integration proxy — seamless support for Grok, Llama, DeepSeek, Mistral and more" },
-                { zh: "设置向导和健康检查更新：新增 Gemini / OpenRouter Integration 的添加说明和环境变量检测", en: "Setup wizard and health check updated: now includes Gemini / OpenRouter integration setup instructions and env var detection" },
-              ],
-            },
-            {
-              version: "v1.1.3",
-              date: "2026-04-07",
-              items: [
-                { zh: "配置助手自动检测 AI Integrations 和存储状态，动态生成仅需要的步骤", en: "Setup wizard auto-detects AI Integrations & storage status; dynamically generates only the steps actually needed" },
-                { zh: "Remix 和 GitHub 导入的用户自动跳过已配置好的步骤", en: "Remix and GitHub-import users skip pre-configured steps automatically" },
-              ],
-            },
-            {
-              version: "v1.1.2",
-              date: "2026-04-07",
-              items: [
-                { zh: "配置助手重新设计：用户现在可以自行设定访问密码，密码明文写入发给 Agent 的指令中，Agent 直接配置，无需二次询问", en: "Setup wizard redesign: user sets their own access password; key is written directly into the Agent prompt — no random-generated key, no follow-up question" },
-                { zh: "配置完成后门户首页「API Key」输入框自动填入用户设定的密码，无需手动复制", en: "Portal auto-fills the API Key field on wizard completion — user doesn't need to type their key a second time" },
-                { zh: "用量统计通过 cloudPersist 持久化到存储（开发环境写本地文件，生产环境写对象存储）：服务器重启或重新部署后统计数据不丢失", en: "Usage stats now persisted via cloudPersist (local file in dev, object storage in prod) — survives restarts and Publish redeploys" },
-                { zh: "认证失败提示语简化：密码由用户自定义，提示只需告知去 Secrets 面板查看或重新运行配置助手", en: "Auth error message simplified to match the new self-defined key flow" },
-              ],
-            },
-            {
-              version: "v1.1.1",
-              date: "2026-04-07",
-              items: [
-                { zh: "流式超时从 120 秒提升到 600 秒（10 分钟），彻底解决长回复（≥5000 token）在传输途中被截断的问题", en: "Streaming fetch timeout raised from 120 s to 600 s — prevents truncation of long responses (5 000+ tokens)" },
-                { zh: "SSE 保活间隔从每 3 秒改为每 15 秒，减少不必要带宽消耗，同时仍可防止代理 60 秒空闲超时", en: "SSE keepalive interval changed from 3 s to 15 s — less overhead while still preventing proxy idle timeouts" },
-                { zh: "统计页「添加节点」区块新增 ENV 节点配置复制框：提示词内容直接可见，点击一键复制发给 Replit Agent", en: "Stats page: ENV node prompt is now displayed in a copyable block — no more hidden-behind-button UX" },
-                { zh: "日志页面只展示最新一条更新，其余历史版本折叠进滚动栏，首页核心功能无需滚动即可看全", en: "Changelog now shows only the latest release by default; all older entries are in a scrollable history section" },
-              ],
-            },
-            {
-              version: "v1.1.0",
-              date: "2026-04-06",
-              items: [
-                { zh: "子节点请求失败自动重试（最多 3 次）：5xx 和网络错误均会自动换一个健康节点重试，不返回错误给客户端", en: "Friend proxy auto-retry: up to 3 attempts, skipping failed nodes on 5xx or network errors — client sees a clean response" },
-                { zh: "区分 HTTP 错误（5xx）与网络错误，精准标记节点不健康并决定是否重试", en: "FriendProxyHttpError distinguishes upstream 5xx from network/timeout errors for smarter retry decisions" },
-                { zh: "流式请求改为首个 chunk 到达后再发 SSE 头，确保在 chunk 来临前仍可切换节点", en: "Streaming: SSE headers committed only after first chunk arrives, preserving the retry window" },
-                { zh: "子节点未返回 usage 时按字符数自动估算 token 用量（≈4字符/token），统计页面不再显示 0", en: "Token fallback: estimate prompt + completion tokens from char count when sub-node omits usage field" },
-              ],
-            },
-            {
-              version: "v1.0.9",
-              date: "2026-04-06",
-              items: [
-                { zh: "配置助手弹窗逻辑修复：改为查询服务器是否已设置 SERVICE_ACCESS_KEY，只在未完成初始化时才自动弹出；配置完成后无论换浏览器或清缓存均不再弹出", en: "Setup wizard no longer auto-pops on every load; now queries server setup status — only shows when SERVICE_ACCESS_KEY is not yet configured" },
-                { zh: "更新方式改为「复制提示词给 Replit Agent」：点击版本徽标→「复制提示词」→粘贴到 Replit AI 对话框，由 Agent 自动拉取最新代码并重启", en: "Update flow changed to 'Copy prompt for Replit Agent': click version badge → copy prompt → paste in Replit AI chat; Agent handles pull + restart" },
-                { zh: "修复用量统计「刷新」按钮被上方元素遮挡无法点击的问题（去除 marginTop: -16px）", en: "Fix: stats refresh button was overlapped and unclickable due to negative margin; now properly positioned" },
-                { zh: "统计加载失败时区分错误类型：服务器未配置 SERVICE_ACCESS_KEY（500）vs API Key 不正确（401），显示针对性提示", en: "Stats error messages now differentiate: 'SERVICE_ACCESS_KEY not configured' (500) vs 'API Key mismatch' (401)" },
-              ],
-            },
-            {
-              version: "v1.0.8",
-              date: "2026-04-06",
-              items: [
-                { zh: "节点管理：全选 / 多选现在覆盖所有子节点（含 ENV 节点），批量启用 / 禁用 / 移除；ENV 节点无移除按钮", en: "Node management: select-all / multi-select now covers all sub-nodes (incl. ENV nodes); batch enable / disable / remove; ENV nodes have no remove button" },
-                { zh: "更新日志加入滚动：仅展示最新 2 条，历史记录通过滚动查看", en: "Changelog scrollable: only 2 latest entries shown by default; scroll to view history" },
-                { zh: "配置助手第 3 步：开通 App Storage，fork 用户的子节点配置 publish 后不再丢失", en: "Setup wizard step 3: provision App Storage so fork users' sub-node configs survive redeploys" },
-              ],
-            },
-            {
-              version: "v1.0.7",
-              date: "2026-04-06",
-              items: [
-                { zh: "修复子节点 / 禁用模型数据 publish 后丢失：改用 Replit 云端对象存储（GCS）持久化，重新部署不再清空", en: "Fix: dynamic backends and disabled models now persisted to GCS — data survives redeploys" },
-                { zh: "修复「重新检测」按钮在错误状态下不可点击的问题；点击后显示 loading 旋转和完成提示", en: "Fix: 'Re-check' button is now always clickable even after an error; shows spinner and completion feedback" },
-                { zh: "修复「检测更新」弹窗按钮在 error 状态重置流程；新增无更新时「已是最新版本」提示", en: "Fix update modal error-state reset flow; show 'Already up to date' notice when no update is available" },
-                { zh: "统计页面：/v1/stats 现在包含全部后端节点（含禁用的），禁用节点以红色边框 + 「已禁用」标签区分", en: "Stats page: /v1/stats now includes all backends including disabled ones; disabled rows show red border + badge" },
-              ],
-            },
-            {
-              version: "v1.0.6",
-              date: "2026-04-06",
-              items: [
-                { zh: "新增「模型管理」标签页：支持按组一键全部启用/禁用，或逐条切换每个模型的开关状态", en: "New 'Model Management' tab: group-level one-click enable/disable and per-model toggle switches" },
-                { zh: "禁用的模型从 /v1/models 响应中过滤，调用时返回 403 错误（model_disabled）", en: "Disabled models are filtered from /v1/models and return 403 (model_disabled) when called" },
-                { zh: "状态持久化到 disabled_models.json，重启后保留设置", en: "State persisted to disabled_models.json, survives server restarts" },
-                { zh: "「立即更新」按钮恢复：一键从 GitHub 拉取最新代码 + 自动重启", en: "Restored one-click update button: pulls latest code from GitHub and auto-restarts" },
-              ],
-            },
-            {
-              version: "v1.0.5",
-              date: "2026-04-06",
-              items: [
-                { zh: "配置助手重写：单步模式，一条指令完成所有初始化（Secret + AI Integrations + 重启），明确禁止 Agent 索取第三方 API Key", en: "SetupWizard rewrite: single-step prompt covers all init (Secret + AI Integrations + restart); forbids Agent from asking for third-party API keys" },
-                { zh: "版本比较修复：正确处理预发布后缀（a/b/rc1 等），stable > 同号 pre-release", en: "Version comparison fix: correctly handles pre-release suffixes (a/b/rc1…); stable > same-number pre-release" },
-                { zh: "子节点 URL 自动补全 /api 后缀（服务端路由层 + 前端统计页）", en: "Sub-node URL auto-normalization: auto-appends /api suffix in server routing and frontend Stats page" },
-                { zh: "X-Service-Version / X-Proxy-Version header 修复：过滤非 ASCII 字符，彻底解决 ERR_INVALID_CHAR 崩溃", en: "X-Service-Version / X-Proxy-Version header fix: strip non-ASCII chars, eliminating ERR_INVALID_CHAR crash" },
-                { zh: "后端批量管理：多选批量启用 / 禁用 / 删除", en: "Batch backend management: multi-select for bulk enable / disable / remove" },
-              ],
-            },
-            {
-              version: "v1.0.1",
-              date: "2026-04-06",
-              items: [
-                { zh: "完整 tool calling 支持 — Claude、Gemini 自动格式互转（tool_use / functionDeclarations）", en: "Full tool calling support — auto-conversion for Claude (tool_use) and Gemini (functionDeclarations)" },
-                { zh: "Claude 流式工具调用：input_json_delta 逐块转发，finish_reason 正确映射为 tool_calls", en: "Claude streaming tool calls: input_json_delta forwarded chunk-by-chunk with correct tool_calls finish_reason" },
-                { zh: "前端三栏重构：首页 / 统计 & 节点 / 端点文档，布局更清晰", en: "Frontend redesigned into 3-tab layout: Home / Stats & Nodes / API Docs" },
-                { zh: "新增 Fleet Manager — 子节点批量版本检测与一键更新", en: "New Fleet Manager — batch version check and one-click update for sub-nodes" },
-              ],
-            },
-            {
-              version: "v1.0.0",
-              date: "2026-04-06",
-              items: [
-                { zh: "正式版发布 — 统一接入 OpenAI / Anthropic / Gemini / OpenRouter 四大后端", en: "Initial release — unified gateway for OpenAI / Anthropic / Gemini / OpenRouter" },
-                { zh: "支持 SillyTavern 兼容模式、CherryStudio 接入、多种认证方式", en: "SillyTavern compatibility mode, CherryStudio integration, multiple auth methods" },
-                { zh: "Replit 文件包热更新机制（无需 GitHub，跨实例推送）", en: "Replit file-bundle hot-update system (no GitHub required, cross-instance push)" },
               ],
             },
           ];
@@ -434,11 +297,7 @@ function PageHome({
             </div>
           );
 
-          return (
-            <div style={{ maxHeight: "260px", overflowY: "auto", paddingRight: "4px" }}>
-              {releases.map(renderRelease)}
-            </div>
-          );
+          return renderRelease(releases[0]);
         })()}
       </Card>
 
