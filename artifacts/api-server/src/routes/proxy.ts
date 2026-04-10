@@ -28,6 +28,13 @@ const ANTHROPIC_BASE_MODELS = [
   "claude-haiku-4-5",
 ];
 
+const CLAUDE_ADAPTIVE_THINKING_MODELS = new Set<string>([
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+]);
+const CLAUDE_DEFAULT_THINKING_BUDGET = 16000;
+const CLAUDE_MIN_THINKING_BUDGET = 1024;
+
 const GEMINI_BASE_MODELS = [
   "gemini-3.1-pro-preview", "gemini-3-flash-preview",
   "gemini-2.5-pro", "gemini-2.5-flash",
@@ -547,25 +554,55 @@ async function fakeStreamResponse(
 function requireApiKey(req: Request, res: Response, next: () => void) {
   const serviceKey = getServiceAccessKey();
   if (!serviceKey) {
+    pushRequestLog({
+      method: req.method,
+      path: req.path,
+      status: 500,
+      duration: 0,
+      stream: false,
+      level: "error",
+      error: "Service access key is not configured",
+    });
     res.status(500).json({ error: { message: "Service access key is not configured", type: "server_error" } });
     return;
   }
 
   const authHeader = req.headers["authorization"];
   const xApiKey = req.headers["x-api-key"];
+  const xGoogApiKey = req.headers["x-goog-api-key"];
 
   let providedKey: string | undefined;
   if (authHeader && authHeader.startsWith("Bearer ")) {
     providedKey = authHeader.slice(7);
   } else if (typeof xApiKey === "string") {
     providedKey = xApiKey;
+  } else if (typeof xGoogApiKey === "string") {
+    providedKey = xGoogApiKey;
   }
 
   if (!providedKey) {
-    res.status(401).json({ error: { message: "Missing access key (provide Authorization: Bearer <key> or x-api-key header)", type: "invalid_request_error" } });
+    pushRequestLog({
+      method: req.method,
+      path: req.path,
+      status: 401,
+      duration: 0,
+      stream: false,
+      level: "warn",
+      error: "Missing access key",
+    });
+    res.status(401).json({ error: { message: "Missing access key (provide Authorization: Bearer <key>, x-api-key, x-goog-api-key, or ?key=...)", type: "invalid_request_error" } });
     return;
   }
   if (providedKey !== serviceKey) {
+    pushRequestLog({
+      method: req.method,
+      path: req.path,
+      status: 401,
+      duration: 0,
+      stream: false,
+      level: "warn",
+      error: "Invalid access key",
+    });
     res.status(401).json({ error: { message: "Invalid access key", type: "invalid_request_error" } });
     return;
   }
@@ -609,7 +646,7 @@ function sendModelCatalog(_req: Request, res: Response) {
 }
 
 for (const path of ["/v1/models", "/service/catalog"]) {
-  router.get(path, requireApiKey, sendModelCatalog);
+  router.get(path, requireApiKeyWithQuery, sendModelCatalog);
 }
 
 // ---------------------------------------------------------------------------
@@ -847,7 +884,14 @@ async function handleChatCompletions(req: Request, res: Response) {
       }
 
       req.log.error({ err }, "Service request failed");
-      const errStatus = (err instanceof FriendProxyHttpError ? err.status : undefined) ?? 500;
+      const errStatus = (
+        err instanceof FriendProxyHttpError
+          ? err.status
+          : err instanceof HttpStatusError
+            ? err.status
+            : undefined
+      ) ?? 500;
+      const errType = errStatus >= 500 ? "server_error" : "invalid_request_error";
       pushRequestLog({
         method: req.method, path: req.path, model: selectedModel,
         backend: backendLabel, status: errStatus, duration: Date.now() - startTime,
@@ -855,7 +899,7 @@ async function handleChatCompletions(req: Request, res: Response) {
         error: errMsg || "Unknown error",
       });
       if (!res.headersSent) {
-        res.status(500).json({ error: { message: errMsg || "Unknown error", type: "server_error" } });
+        res.status(errStatus).json({ error: { message: errMsg || "Unknown error", type: errType } });
       } else if (!res.writableEnded) {
         writeAndFlush(res, `data: ${JSON.stringify({ error: { message: errMsg || "Unknown error" } })}\n\n`);
         writeAndFlush(res, "data: [DONE]\n\n");
@@ -1228,7 +1272,7 @@ function updateModels(req: Request, res: Response) {
 }
 
 for (const path of ["/v1/admin/models", "/service/models"]) {
-  router.get(path, requireApiKey, listModels);
+  router.get(path, requireApiKeyWithQuery, listModels);
   router.patch(path, requireApiKey, updateModels);
 }
 
@@ -1238,6 +1282,13 @@ for (const path of ["/v1/admin/models", "/service/models"]) {
 
 // Distinguishes upstream HTTP errors (5xx) from network/timeout errors so the
 // retry logic can make the right decision about whether to try another node.
+class HttpStatusError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "HttpStatusError";
+  }
+}
+
 class FriendProxyHttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -1616,8 +1667,6 @@ async function handleClaude({
   toolChoice?: unknown;
   startTime: number;
 }): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
-  const THINKING_BUDGET = 16000;
-
   // Extract system prompt
   const systemMessages = messages
     .filter((m) => m.role === "system")
@@ -1627,9 +1676,39 @@ async function handleClaude({
   // Convert all messages including tool_calls / tool roles
   const chatMessages = convertMessagesForClaude(messages);
 
-  const thinkingParam = thinking
-    ? { thinking: { type: "enabled" as const, budget_tokens: THINKING_BUDGET } }
-    : {};
+  let thinkingParam:
+    | {}
+    | { thinking: { type: "adaptive" } }
+    | { thinking: { type: "enabled"; budget_tokens: number } } = {};
+
+  if (thinking) {
+    if (CLAUDE_ADAPTIVE_THINKING_MODELS.has(model)) {
+      thinkingParam = { thinking: { type: "adaptive" } };
+    } else {
+      if (maxTokens <= CLAUDE_MIN_THINKING_BUDGET) {
+        throw new HttpStatusError(
+          400,
+          `Thinking mode for '${model}' requires max_tokens greater than ${CLAUDE_MIN_THINKING_BUDGET}. Received ${maxTokens}.`,
+        );
+      }
+
+      const budgetTokens = Math.max(
+        CLAUDE_MIN_THINKING_BUDGET,
+        Math.min(CLAUDE_DEFAULT_THINKING_BUDGET, maxTokens - 1),
+      );
+
+      if (budgetTokens >= maxTokens) {
+        throw new HttpStatusError(
+          400,
+          `Thinking mode for '${model}' requires max_tokens greater than thinking.budget_tokens. Received max_tokens=${maxTokens}.`,
+        );
+      }
+
+      thinkingParam = {
+        thinking: { type: "enabled", budget_tokens: budgetTokens },
+      };
+    }
+  }
 
   // Convert tools to Anthropic format
   const anthropicTools = tools?.length ? convertToolsForClaude(tools) : undefined;
@@ -1642,6 +1721,19 @@ async function handleClaude({
     else if (typeof toolChoice === "object" && (toolChoice as Record<string, unknown>).type === "function") {
       anthropicToolChoice = { type: "tool", name: ((toolChoice as Record<string, unknown>).function as Record<string, unknown>).name };
     }
+  }
+
+  if (
+    thinking
+    && anthropicToolChoice
+    && typeof anthropicToolChoice === "object"
+    && (anthropicToolChoice as { type?: string }).type
+    && ["any", "tool"].includes((anthropicToolChoice as { type?: string }).type!)
+  ) {
+    throw new HttpStatusError(
+      400,
+      "Claude thinking mode only supports tool_choice values of 'auto' or 'none'.",
+    );
   }
 
   const buildCreateParams = () => ({
