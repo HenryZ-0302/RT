@@ -1,0 +1,6 @@
+{
+  "version": "1.2.0",
+  "name": "Unified Service Layer",
+  "releaseDate": "2026-04-10",
+  "releaseNotes": "v1.2.0：整理门户控制台界面结构，统一版本入口与基础交互，并保留现有服务接口与配置流程。"
+}

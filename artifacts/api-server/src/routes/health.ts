@@ -1,12 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { HealthCheckResponse } from "@workspace/api-zod";
 import { getServiceAccessKey } from "../lib/serviceConfig";
 
 const router: IRouter = Router();
 
 function sendHealth(_req: Request, res: Response) {
-  const data = HealthCheckResponse.parse({ status: "ok" });
-  res.json(data);
+  res.json({ status: "ok" });
 }
 
 function sendBootstrap(_req: Request, res: Response) {
