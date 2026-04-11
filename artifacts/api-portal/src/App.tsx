@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import SetupWizard from "./components/SetupWizard";
 import UpdateBadge from "./components/UpdateBadge";
 import PageLogs from "./components/PageLogs";
@@ -245,11 +245,10 @@ function ModelGroup({ title, models, provider, expanded, onToggle }: {
 // ---------------------------------------------------------------------------
 
 function PageHome({
-  displayUrl, apiKey, setApiKey, sillyTavernMode, stLoading, onToggleSTMode,
+  displayUrl, apiKey, sillyTavernMode, stLoading, onToggleSTMode,
 }: {
   displayUrl: string;
   apiKey: string;
-  setApiKey: (k: string) => void;
   sillyTavernMode: boolean;
   stLoading: boolean;
   onToggleSTMode: () => void;
@@ -350,22 +349,18 @@ function PageHome({
         </div>
       </Card>
 
-      {/* API Key + SillyTavern */}
+      {/* Access + SillyTavern */}
       <Card>
         <SectionTitle>访问密码 & 设置</SectionTitle>
         <div style={{ marginBottom: "14px" }}>
-          <label style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "6px" }}>API Key（SERVICE_ACCESS_KEY）</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => { setApiKey(e.target.value); storeServiceKey(e.target.value); }}
-            placeholder="输入你的 SERVICE_ACCESS_KEY"
-            style={{
-              width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: "8px", padding: "8px 12px", color: "#e2e8f0",
-              fontFamily: "Menlo, monospace", fontSize: "13px", outline: "none", boxSizing: "border-box",
-            }}
-          />
+          <div style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "6px" }}>服务密钥状态</div>
+          <div style={{
+            width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: "8px", padding: "10px 12px", color: "#cbd5e1",
+            fontSize: "12.5px", lineHeight: "1.6", boxSizing: "border-box",
+          }}>
+            {apiKey ? "当前会话已通过服务密钥验证，站内不再提供修改入口。" : "尚未完成服务密钥验证。"}
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
           <div style={{ flex: 1 }}>
@@ -1875,6 +1870,11 @@ export default function App() {
   const [sillyTavernMode, setSillyTavernMode] = useState(false);
   const [stLoading, setStLoading] = useState(true);
   const [apiKey, setApiKey] = useState(() => getStoredServiceKey());
+  const [gateKey, setGateKey] = useState(() => getStoredServiceKey());
+  const [gateReady, setGateReady] = useState(false);
+  const [gateUnlocked, setGateUnlocked] = useState(false);
+  const [gateLoading, setGateLoading] = useState(false);
+  const [gateError, setGateError] = useState("");
   const [showWizard, setShowWizard] = useState(false);
   const [stats, setStats] = useState<Record<string, BackendStat> | null>(null);
   const [modelStats, setModelStats] = useState<Record<string, ModelStat> | null>(null);
@@ -1918,6 +1918,50 @@ export default function App() {
       if (!res.ok) setSillyTavernMode(!newVal);
     } catch { setSillyTavernMode(!newVal); }
   };
+
+  const verifyServiceKey = useCallback(async (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      setGateError("请输入服务密钥。");
+      setGateReady(true);
+      setGateUnlocked(false);
+      return false;
+    }
+
+    setGateLoading(true);
+    setGateError("");
+    try {
+      const response = await fetch(servicePaths.metrics(baseUrl), {
+        headers: { Authorization: `Bearer ${trimmed}` },
+      });
+      if (!response.ok) {
+        if (response.status === 401) {
+          setGateError("服务密钥不正确，请重新输入。");
+        } else if (response.status === 500) {
+          setGateError("服务端尚未完成初始化，请先确认部署环境已配置 SERVICE_ACCESS_KEY。");
+        } else {
+          setGateError(`验证失败（HTTP ${response.status}）。`);
+        }
+        setGateReady(true);
+        setGateUnlocked(false);
+        return false;
+      }
+
+      setApiKey(trimmed);
+      setGateKey(trimmed);
+      storeServiceKey(trimmed);
+      setGateUnlocked(true);
+      setGateReady(true);
+      return true;
+    } catch {
+      setGateError("无法连接到服务，请稍后重试。");
+      setGateReady(true);
+      setGateUnlocked(false);
+      return false;
+    } finally {
+      setGateLoading(false);
+    }
+  }, [baseUrl]);
 
   const fetchStats = useCallback(async (key: string) => {
     if (!key) { setStats(null); setModelStats(null); setStatsError(false); return; }
@@ -2055,6 +2099,17 @@ export default function App() {
   };
 
   useEffect(() => {
+    const storedKey = getStoredServiceKey();
+    setGateKey(storedKey);
+    if (!storedKey) {
+      setGateReady(true);
+      setGateUnlocked(false);
+      return;
+    }
+    void verifyServiceKey(storedKey);
+  }, [verifyServiceKey]);
+
+  useEffect(() => {
     checkHealth();
     fetchSTMode();
     fetchStats(apiKey);
@@ -2084,6 +2139,108 @@ export default function App() {
     { id: "logs", label: "日志", icon: "&#128203;" },
     { id: "endpoints", label: "文档", icon: "&#128214;" },
   ];
+
+  if (!gateUnlocked) {
+    return (
+      <div style={{ minHeight: "100vh", background: "hsl(222,47%,11%)", color: "#e2e8f0", fontFamily: "'Inter', -apple-system, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}>
+        <div style={{
+          width: "100%",
+          maxWidth: "420px",
+          background: "rgba(15,23,42,0.92)",
+          border: "1px solid rgba(148,163,184,0.18)",
+          borderRadius: "18px",
+          padding: "28px 24px",
+          boxShadow: "0 28px 80px rgba(0,0,0,0.35)",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
+            <div style={{
+              width: "38px",
+              height: "38px",
+              borderRadius: "12px",
+              background: "rgba(99,102,241,0.16)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "18px",
+            }}>
+              🔐
+            </div>
+            <div>
+              <div style={{ fontSize: "16px", fontWeight: 700, color: "#f8fafc" }}>进入前验证服务密钥</div>
+              <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "4px" }}>验证通过后才会显示门户内容。</div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: "12px", color: "#94a3b8", marginBottom: "8px" }}>SERVICE_ACCESS_KEY</div>
+          <input
+            type="password"
+            value={gateKey}
+            onChange={(e) => {
+              setGateKey(e.target.value);
+              setGateError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !gateLoading) {
+                void verifyServiceKey(gateKey);
+              }
+            }}
+            placeholder="请输入服务密钥"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              borderRadius: "12px",
+              border: "1px solid rgba(148,163,184,0.18)",
+              background: "rgba(15,23,42,0.72)",
+              color: "#e2e8f0",
+              padding: "12px 14px",
+              fontSize: "14px",
+              outline: "none",
+              marginBottom: "12px",
+            }}
+          />
+
+          <button
+            onClick={() => { void verifyServiceKey(gateKey); }}
+            disabled={gateLoading}
+            style={{
+              width: "100%",
+              border: "1px solid rgba(99,102,241,0.28)",
+              background: gateLoading ? "rgba(99,102,241,0.12)" : "rgba(99,102,241,0.22)",
+              color: gateLoading ? "#94a3b8" : "#e2e8f0",
+              borderRadius: "12px",
+              padding: "12px 14px",
+              fontSize: "14px",
+              fontWeight: 700,
+              cursor: gateLoading ? "not-allowed" : "pointer",
+            }}
+          >
+            {gateLoading ? "验证中..." : gateReady ? "重新验证" : "验证并进入"}
+          </button>
+
+          {gateError && (
+            <div style={{
+              marginTop: "12px",
+              borderRadius: "12px",
+              border: "1px solid rgba(248,113,113,0.22)",
+              background: "rgba(127,29,29,0.16)",
+              color: "#fecaca",
+              padding: "10px 12px",
+              fontSize: "12px",
+              lineHeight: "1.6",
+            }}>
+              {gateError}
+            </div>
+          )}
+
+          {!gateReady && (
+            <div style={{ marginTop: "12px", fontSize: "12px", color: "#94a3b8", lineHeight: "1.6" }}>
+              正在检查本地已保存的服务密钥...
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "hsl(222,47%,11%)", color: "#e2e8f0", fontFamily: "'Inter', -apple-system, sans-serif" }}>

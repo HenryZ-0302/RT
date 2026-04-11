@@ -825,14 +825,15 @@ async function handleChatCompletions(req: Request, res: Response) {
           "claude-haiku-4-5": 8096,
           "claude-sonnet-4-5": 64000,
           "claude-sonnet-4-6": 64000,
-          "claude-opus-4-1": 64000,
+          "claude-opus-4-1": 32000,
           "claude-opus-4-5": 64000,
           "claude-opus-4-6": 64000,
         };
         const modelMax = CLAUDE_MODEL_MAX[actualModel] ?? 32000;
         const defaultMaxTokens = thinkingEnabled ? Math.max(modelMax, 32000) : modelMax;
+        const resolvedMaxTokens = Math.min(max_tokens ?? defaultMaxTokens, modelMax);
         const client = makeLocalAnthropic();
-        result = await handleClaude({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens ?? defaultMaxTokens, thinking: thinkingEnabled, tools, toolChoice: tool_choice, startTime });
+        result = await handleClaude({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: resolvedMaxTokens, thinking: thinkingEnabled, tools, toolChoice: tool_choice, startTime });
       } else if (isGeminiModel) {
         const thinkingVisible = selectedModel.endsWith("-thinking-visible");
         const thinkingEnabled = thinkingVisible || selectedModel.endsWith("-thinking");
