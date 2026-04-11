@@ -28,6 +28,9 @@
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
 
+  --color-sidebar-bg: hsl(var(--sidebar-bg));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+
   --font-sans: var(--app-font-sans);
   --font-mono: var(--app-font-mono);
 
@@ -37,33 +40,57 @@
 }
 
 :root {
+  --background: 210 40% 98%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 246 83% 58%; /* vibrant purple-indigo */
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 246 83% 58%;
+  
+  --sidebar-bg: 210 40% 98%;
+  --sidebar-border: 214.3 31.8% 91.4%;
+
+  --app-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --app-font-mono: 'JetBrains Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --radius: 0.75rem;
+}
+
+.dark {
   --background: 222 47% 11%;
   --foreground: 214 32% 91%;
-  --border: 217 32% 20%;
-  --input: 217 32% 18%;
-  --ring: 252 58% 67%;
-
   --card: 222 42% 14%;
   --card-foreground: 214 32% 91%;
-
-  --primary: 252 58% 67%;
-  --primary-foreground: 222 47% 11%;
-
+  --popover: 222 47% 11%;
+  --popover-foreground: 214 32% 91%;
+  --primary: 246 83% 58%; /* vibrant purple-indigo */
+  --primary-foreground: 0 0% 100%;
   --secondary: 222 40% 18%;
   --secondary-foreground: 214 32% 80%;
-
   --muted: 222 40% 16%;
   --muted-foreground: 215 20% 55%;
-
   --accent: 222 40% 18%;
   --accent-foreground: 214 32% 80%;
-
   --destructive: 0 72% 61%;
   --destructive-foreground: 0 0% 100%;
+  --border: 217 32% 20%;
+  --input: 217 32% 18%;
+  --ring: 246 83% 58%;
 
-  --app-font-sans: 'Inter', -apple-system, sans-serif;
-  --app-font-mono: Menlo, monospace;
-  --radius: 0.5rem;
+  --sidebar-bg: 222 47% 9%;
+  --sidebar-border: 217 32% 17%;
 }
 
 @layer base {
@@ -74,17 +101,18 @@
   }
 
   body {
-    background: hsl(222, 47%, 11%);
-    color: hsl(214, 32%, 91%);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
     font-family: var(--app-font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 }
 
-@keyframes pulse {
+@keyframes pulse-subtle {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.6; }
 }
 
 @keyframes fadeIn {
@@ -100,9 +128,15 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.2);
+  background: rgba(148, 163, 184, 0.4);
   border-radius: 3px;
 }
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.4);
+  background: rgba(148, 163, 184, 0.6);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
 }
