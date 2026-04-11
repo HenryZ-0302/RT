@@ -228,25 +228,42 @@ export default function App() {
   }, [baseUrl]);
 
   const toggleModelProvider = async (provider: string, enabled: boolean) => {
+    // Optimistic update
+    setModelStatus((prev) => prev.map((m) => m.provider === provider ? { ...m, enabled } : m));
+    setModelSummary((prev) => {
+      const grp = prev[provider];
+      if (!grp) return prev;
+      return { ...prev, [provider]: { total: grp.total, enabled: enabled ? grp.total : 0 } };
+    });
     try {
-      await fetch(`${baseUrl}/api/service/config/models/group/${provider}`, {
-        method: "POST",
+      await fetch(`${baseUrl}/api/service/config/models`, {
+        method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ provider, enabled }),
       });
-      fetchModels(apiKey);
     } catch {}
+    fetchModels(apiKey);
   };
 
   const toggleModelById = async (id: string, enabled: boolean) => {
+    // Optimistic update
+    setModelStatus((prev) => prev.map((m) => m.id === id ? { ...m, enabled } : m));
+    setModelSummary((prev) => {
+      const m = modelStatus.find((ms) => ms.id === id);
+      if (!m) return prev;
+      const grp = prev[m.provider];
+      if (!grp) return prev;
+      const delta = enabled ? 1 : -1;
+      return { ...prev, [m.provider]: { total: grp.total, enabled: Math.max(0, Math.min(grp.total, grp.enabled + delta)) } };
+    });
     try {
-      await fetch(`${baseUrl}/api/service/config/models/${encodeURIComponent(id)}`, {
-        method: "POST",
+      await fetch(`${baseUrl}/api/service/config/models`, {
+        method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify({ ids: [id], enabled }),
       });
-      fetchModels(apiKey);
     } catch {}
+    fetchModels(apiKey);
   };
 
   useEffect(() => { checkHealth(); }, [checkHealth]);

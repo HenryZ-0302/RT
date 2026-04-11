@@ -168,8 +168,11 @@ export function ModelsPage({
   const [testState, setTestState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [testResult, setTestResult] = useState<{ time?: number; status?: number; data?: any; error?: string }>({});
 
-  const runTest = async () => {
-    if (!testModel) return;
+  const runTest = async (modelToTest: string = testModel) => {
+    const targetModel = modelToTest || testModel;
+    if (!targetModel) return;
+    
+    setTestModel(targetModel);
     setTestState("loading");
     setTestResult({});
     const start = Date.now();
@@ -181,7 +184,7 @@ export function ModelsPage({
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: testModel,
+          model: targetModel,
           messages: [{role: "user", content: "test, reply ok"}],
           max_tokens: 10
         })
@@ -287,7 +290,7 @@ export function ModelsPage({
               ))}
             </select>
             <button 
-              onClick={runTest}
+              onClick={() => runTest()}
               disabled={!testModel || testState === "loading"}
               className="bg-primary text-primary-foreground px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2 flex-shrink-0"
             >
@@ -421,7 +424,18 @@ export function ModelsPage({
                                {m.badge && <Badge variant={m.badge} />}
                             </div>
                           </div>
-                          <div className="ml-auto pl-4 flex items-center">
+                          <div className="ml-auto pl-4 flex items-center gap-3">
+                            <button
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                runTest(m.id);
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
+                              className="text-muted-foreground hover:text-blue-500 transition-colors p-1 hover:bg-blue-500/10 rounded"
+                              title="进行连通性测试"
+                            >
+                              <PlayCircle size={15} />
+                            </button>
                             <ModelToggle enabled={enabled} onChange={() => onToggleModel(m.id, !enabled)} />
                           </div>
                         </div>
