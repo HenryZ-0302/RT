@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { Route, Switch, Router } from "wouter";
 import SetupWizard from "./components/SetupWizard";
 import PageLogs from "./components/PageLogs";
-import { UpdateBar } from "./components/UpdateBar";
 import { AppLayout } from "./layouts/AppLayout";
 import { ThemeProvider } from "./components/theme-provider";
 import { HomePage } from "./pages/HomePage";
@@ -367,7 +366,6 @@ export default function App() {
   // Full Dashboard Mode
   return (
     <ThemeProvider>
-      <UpdateBar baseUrl={baseUrl} apiKey={apiKey} />
       <Router>
         <AppLayout>
           <Switch>
