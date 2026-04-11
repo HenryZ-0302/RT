@@ -167,8 +167,8 @@ export default function App() {
     if (current[label]) current[label] = { ...current[label], enabled };
     setStats(current);
     try {
-      await fetch(servicePaths.backendEn(baseUrl, label), {
-        method: "POST",
+      await fetch(servicePaths.backend(baseUrl, label), {
+        method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
@@ -182,8 +182,8 @@ export default function App() {
     labels.forEach((l) => { if (current[l]) current[l] = { ...current[l], enabled }; });
     setStats(current);
     try {
-      await fetch(`${baseUrl}/api/service/backends/batch/enabled`, {
-        method: "POST",
+      await fetch(servicePaths.backends(baseUrl), {
+        method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ labels, enabled }),
       });
@@ -194,11 +194,12 @@ export default function App() {
   const batchRemoveBackends = async (labels: string[]) => {
     if (!labels.length) return;
     try {
-      await fetch(`${baseUrl}/api/service/backends/batch/delete`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ labels }),
-      });
+      await Promise.all(labels.map((l) =>
+        fetch(servicePaths.backend(baseUrl, l), {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${apiKey}` },
+        })
+      ));
       fetchStats(apiKey);
     } catch {}
   };
@@ -208,9 +209,9 @@ export default function App() {
     setRouting(current);
     try {
       await fetch(`${baseUrl}/api/service/routing`, {
-        method: "POST",
+        method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(current),
+        body: JSON.stringify({ [field]: value }),
       });
       fetchStats(apiKey);
     } catch {}
