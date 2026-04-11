@@ -329,13 +329,15 @@ export default function App() {
             <SetupWizard
                baseUrl={baseUrl}
                onComplete={async (k) => {
-                 setGateKey(k);
-                 setApiKey(k);
-                 storeServiceKey(k);
+                 if (k) {
+                   setGateKey(k);
+                   setApiKey(k);
+                   storeServiceKey(k);
+                   setGateUnlocked(true);
+                 }
                  setShowWizard(false);
-                 setGateUnlocked(true);
                }}
-               onCancel={() => setShowWizard(false)}
+               onDismiss={() => setShowWizard(false)}
             />
          </AppLayout>
       </ThemeProvider>
