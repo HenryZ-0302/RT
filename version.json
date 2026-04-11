@@ -1,6 +1,6 @@
 {
-  "version": "1.1.8",
+  "version": "1.2.0",
   "name": "Unified Service Layer",
   "releaseDate": "2026-04-10",
-  "releaseNotes": "v1.1.8 — 补充模型列表鉴权兼容、Claude thinking 路径修复、Claude Opus 4.1 上限修复，并将门户调整为前置服务密钥验证；相对 v1.1.7 更偏向接入兼容性、请求稳定性与入口收口。"
+  "releaseNotes": "v1.2.0 — 重大 UI 升级：使用 Tailwind CSS 模块化重构前台控制面板。新增全局暗色模式过渡动画、恢复全部模型与路由的开关下发逻辑、彻底清理过时机制，带来全方位极速流畅的控制体验。"
 }

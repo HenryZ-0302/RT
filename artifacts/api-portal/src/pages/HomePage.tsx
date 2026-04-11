@@ -11,6 +11,7 @@ import {
   Info
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import versionData from "../../../../version.json";
 
 // Helper components
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -79,23 +80,12 @@ export function HomePage({
         
         <div className="mb-4 relative">
           <div className="flex items-center gap-3 mb-2">
-            <span className="font-mono text-sm font-bold text-primary">v1.1.8 (mask_dev_ui)</span>
-            <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">2026-04-10</span>
+            <span className="font-mono text-sm font-bold text-primary">v{versionData.version}</span>
+            <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{versionData.releaseDate}</span>
           </div>
-          <ul className="space-y-2.5 ml-1">
-            {[
-              "全新现代深浅色 UI 界面，玻璃拟态风格与侧边栏布局。",
-              "修复聊天客户端获取模型列表的兼容问题，/v1/models 现在兼容更多鉴权传法。",
-              "修复 Claude thinking 路径：4.6 系列改用更合适的 thinking 方式，并补齐相关请求限制处理。",
-              "修复 Claude Opus 4.1 的输出上限，避免 max_tokens 超限导致上游直接报错。",
-              "门户改成进站前先验证服务密钥，站内移除重复密钥入口，导航精简。"
-            ].map((item, i) => (
-              <li key={i} className="flex gap-2.5 items-start text-sm text-muted-foreground">
-                <span className="text-primary mt-1 flex-shrink-0 text-[10px]">●</span>
-                <span className="leading-relaxed">{item}</span>
-              </li>
-            ))}
-          </ul>
+          <p className="text-sm text-muted-foreground leading-relaxed ml-1">
+            {versionData.releaseNotes}
+          </p>
         </div>
       </Card>
 
