@@ -333,13 +333,11 @@ export default function App() {
             <SetupWizard
                baseUrl={baseUrl}
                onComplete={async (k) => {
+                 setShowWizard(false);
                  if (k) {
                    setGateKey(k);
-                   setApiKey(k);
-                   storeServiceKey(k);
-                   setGateUnlocked(true);
+                   await verifyServiceKey(k);
                  }
-                 setShowWizard(false);
                }}
                onDismiss={() => setShowWizard(false)}
             />
