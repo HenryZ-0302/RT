@@ -10,7 +10,10 @@ import {
   Copy,
   Check,
   Terminal,
-  BookOpen
+  BookOpen,
+  Activity,
+  AlertCircle,
+  Loader2
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -166,6 +169,39 @@ export function ModelsPage({
   });
   const [filter, setFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [checkResults, setCheckResults] = useState<Record<string, { ok: boolean; error?: string; latency?: number }>>({});
+
+  const testModel = async (modelId: string) => {
+    if (checkingId) return;
+    setCheckingId(modelId);
+    const start = Date.now();
+    try {
+      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1
+        })
+      });
+      const latency = Date.now() - start;
+      if (res.ok) {
+        setCheckResults(prev => ({ ...prev, [modelId]: { ok: true, latency } }));
+      } else {
+        const err = await res.json().catch(() => ({ error: { message: "Unknown error" } }));
+        setCheckResults(prev => ({ ...prev, [modelId]: { ok: false, error: err.error?.message || `HTTP ${res.status}` } }));
+      }
+    } catch (e) {
+      setCheckResults(prev => ({ ...prev, [modelId]: { ok: false, error: (e as Error).message } }));
+    } finally {
+      setCheckingId(null);
+    }
+  };
 
   const allGroups = [
     { key: "openai", title: "OpenAI", models: OPENAI_MODELS, provider: "openai" as Provider },
@@ -337,7 +373,39 @@ export function ModelsPage({
                                {m.badge && <Badge variant={m.badge} />}
                             </div>
                           </div>
-                          <div className="ml-auto pl-4 flex items-center">
+                          <div className="ml-auto pl-4 flex items-center gap-3">
+                            {/* Healthcheck Result */}
+                            {checkResults[m.id] && (
+                              <div className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold animate-in fade-in slide-in-from-right-2",
+                                checkResults[m.id].ok 
+                                  ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" 
+                                  : "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                              )} title={checkResults[m.id].error}>
+                                {checkResults[m.id].ok ? (
+                                  <><span>OK</span><span className="opacity-50 font-normal">{checkResults[m.id].latency}ms</span></>
+                                ) : (
+                                  <><AlertCircle size={10} /><span>FAIL</span></>
+                                )}
+                              </div>
+                            )}
+
+                            <button
+                              onClick={(e) => { e.stopPropagation(); testModel(m.id); }}
+                              disabled={!enabled || checkingId === m.id}
+                              className={cn(
+                                "p-1.5 rounded-lg border transition-all",
+                                checkingId === m.id ? "bg-secondary animate-pulse" : "bg-background hover:bg-secondary text-muted-foreground hover:text-primary border-border"
+                              )}
+                              title="连通性测试"
+                            >
+                              {checkingId === m.id ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <Activity size={14} />
+                              )}
+                            </button>
+
                             <ModelToggle enabled={enabled} onChange={() => onToggleModel(m.id, !enabled)} />
                           </div>
                         </div>
