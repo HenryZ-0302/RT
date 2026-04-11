@@ -177,7 +177,7 @@ export function ModelsPage({
       const res = await fetch(`${baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: {
-          "Authorization": \`Bearer \${apiKey}\`,
+          "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
@@ -307,7 +307,7 @@ export function ModelsPage({
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-4">
                   <span className="font-bold">Status: <span className={testResult.status === 200 ? "text-emerald-500" : "text-destructive"}>{testResult.status ?? "ERR"}</span></span>
-                  <span className="font-bold">Latency: {testResult.time ? \`\${testResult.time}ms\` : "--"}</span>
+                  <span className="font-bold">Latency: {testResult.time ? `${testResult.time}ms` : "--"}</span>
                 </div>
                 <div className="bg-background/50 p-2.5 rounded text-[11px] max-h-40 overflow-y-auto whitespace-pre-wrap break-all border border-border/50">
                    {testResult.error ? testResult.error : JSON.stringify(testResult.data, null, 2)}
