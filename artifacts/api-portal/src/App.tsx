@@ -350,15 +350,6 @@ export default function App() {
         <AppLayout>
           <Switch>
             <Route path="/">
-              <HomePage 
-                displayUrl={displayUrl}
-                apiKey={apiKey}
-                sillyTavernMode={sillyTavernMode}
-                stLoading={stLoading}
-                onToggleSTMode={toggleSTMode}
-              />
-            </Route>
-            <Route path="/stats">
               <div className="space-y-6">
                 <StatsPage 
                   baseUrl={baseUrl} apiKey={apiKey}
@@ -383,6 +374,15 @@ export default function App() {
             </Route>
             <Route path="/logs">
               <PageLogs baseUrl={baseUrl} apiKey={apiKey} />
+            </Route>
+            <Route path="/settings">
+              <HomePage 
+                displayUrl={displayUrl}
+                apiKey={apiKey}
+                sillyTavernMode={sillyTavernMode}
+                stLoading={stLoading}
+                onToggleSTMode={toggleSTMode}
+              />
             </Route>
           </Switch>
         </AppLayout>

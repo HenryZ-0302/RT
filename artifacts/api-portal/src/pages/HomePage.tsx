@@ -148,7 +148,7 @@ export function HomePage({
 
       {/* SillyTavern */}
       <Card>
-        <SectionTitle>访问密码 & 客户端设置</SectionTitle>
+        <SectionTitle>客户端设置</SectionTitle>
         <div className="flex items-center justify-between gap-6">
           <div className="flex-1">
             <h3 className="font-semibold text-[15px] mb-1">SillyTavern 兼容模式</h3>

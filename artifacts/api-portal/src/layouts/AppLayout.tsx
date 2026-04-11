@@ -16,10 +16,10 @@ import { useTheme } from "../components/theme-provider";
 import { cn } from "../lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/", label: "总览", icon: LayoutDashboard },
-  { href: "/stats", label: "统计", icon: BarChart2 },
+  { href: "/", label: "统计", icon: BarChart2 },
   { href: "/models", label: "模型", icon: Server },
   { href: "/logs", label: "日志", icon: ScrollText },
+  { href: "/settings", label: "设置", icon: LayoutDashboard },
 ];
 
 export function AppLayout({ children, isSetup }: { children: React.ReactNode, isSetup?: boolean }) {
@@ -118,7 +118,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
            </div>
            
            <div className="hidden md:block text-sm font-medium text-muted-foreground capitalize">
-             {location === '/' ? 'Dashboard' : location.slice(1)}
+             {location === '/' ? 'Stats' : location.slice(1)}
            </div>
 
            <div className="flex items-center gap-4">
