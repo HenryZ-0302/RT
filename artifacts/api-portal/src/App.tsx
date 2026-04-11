@@ -251,7 +251,11 @@ export default function App() {
 
   useEffect(() => { checkHealth(); }, [checkHealth]);
   useEffect(() => { fetchSTMode(); }, [fetchSTMode]);
-  useEffect(() => { if (gateKey) verifyServiceKey(gateKey); else setGateReady(true); }, [gateKey, verifyServiceKey]);
+  useEffect(() => { 
+    const initialKey = getStoredServiceKey();
+    if (initialKey) verifyServiceKey(initialKey); 
+    else setGateReady(true); 
+  }, [verifyServiceKey]);
   useEffect(() => {
     if (!gateUnlocked) return;
     fetchStats(apiKey);
