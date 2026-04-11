@@ -39,7 +39,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
               {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
            </button>
         </div>
-        <div className="w-full max-w-xl px-4">
+        <div className="w-full max-w-xl px-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
           {children}
         </div>
       </div>
@@ -133,7 +133,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
         </header>
         
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-6 lg:p-8 relative bg-secondary/20 block">
-           <div className="max-w-6xl mx-auto w-full h-full animate-in fade-in slide-in-from-bottom-2 duration-500 pb-10">
+           <div key={location} className="max-w-6xl mx-auto w-full h-full animate-in fade-in slide-in-from-bottom-4 duration-500 pb-10">
               {children}
            </div>
         </main>

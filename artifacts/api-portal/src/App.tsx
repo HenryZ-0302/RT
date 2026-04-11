@@ -282,7 +282,7 @@ export default function App() {
     return (
       <ThemeProvider>
         <AppLayout isSetup>
-          <div className="w-full max-w-md mx-auto relative bg-card text-card-foreground p-8 rounded-2xl shadow-xl shadow-black/5 border border-border/50 overflow-hidden">
+          <div className="w-full max-w-md mx-auto relative bg-card text-card-foreground p-8 rounded-2xl shadow-xl shadow-black/5 border border-border/50 overflow-hidden animate-in fade-in zoom-in-95 duration-500">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/80 via-purple-500/80 to-primary/80" />
             <h1 className="text-2xl font-bold mb-2 flex items-center justify-center gap-3 tracking-tight">
                <span className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-lg shadow-inner">R</span>
