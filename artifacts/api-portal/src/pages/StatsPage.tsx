@@ -19,6 +19,76 @@ type ModelStat = { calls: number; promptTokens: number; completionTokens: number
 
 const DEFAULT_PRICING = { input: 3, output: 15 };
 
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "gpt-5": { input: 2.5, output: 10 },
+  "gpt-5-turbo": { input: 1.5, output: 6 },
+  "gpt-5-mini": { input: 0.15, output: 0.6 },
+  "gpt-5-nano": { input: 0.075, output: 0.3 },
+  "gpt-4.1": { input: 2, output: 8 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
+  "gpt-4o": { input: 2.5, output: 10 },
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "gpt-4-turbo": { input: 10, output: 30 },
+  "gpt-4": { input: 30, output: 60 },
+  "gpt-3.5-turbo": { input: 0.5, output: 1.5 },
+  "o4-mini": { input: 1.1, output: 4.4 },
+  "o3": { input: 10, output: 40 },
+  "o3-mini": { input: 1.1, output: 4.4 },
+  "o1": { input: 15, output: 60 },
+  "o1-mini": { input: 3, output: 12 },
+  "o1-pro": { input: 150, output: 600 },
+  "claude-opus-4-6": { input: 15, output: 75 },
+  "claude-opus-4-5": { input: 15, output: 75 },
+  "claude-opus-4-1": { input: 15, output: 75 },
+  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-sonnet-4-5": { input: 3, output: 15 },
+  "claude-haiku-4-5": { input: 0.8, output: 4 },
+  "claude-3-7-sonnet": { input: 3, output: 15 },
+  "claude-3-5-sonnet": { input: 3, output: 15 },
+  "claude-3-5-haiku": { input: 0.8, output: 4 },
+  "claude-3-opus": { input: 15, output: 75 },
+  "claude-3-sonnet": { input: 3, output: 15 },
+  "claude-3-haiku": { input: 0.25, output: 1.25 },
+  "gemini-3.1-pro": { input: 1.25, output: 10 },
+  "gemini-3-flash": { input: 0.15, output: 0.6 },
+  "gemini-2.5-pro": { input: 1.25, output: 10 },
+  "gemini-2.5-flash": { input: 0.15, output: 0.6 },
+  "gemini-2.0-flash": { input: 0.1, output: 0.4 },
+  "gemini-2.0-flash-lite": { input: 0.075, output: 0.3 },
+  "gemini-1.5-pro": { input: 1.25, output: 5 },
+  "gemini-1.5-flash": { input: 0.075, output: 0.3 },
+  "gemini-1.5-flash-8b": { input: 0.0375, output: 0.15 },
+  "grok-4": { input: 3, output: 15 },
+  "grok-4.1": { input: 3, output: 15 },
+  "grok-4.20": { input: 3, output: 15 },
+  "llama-4": { input: 0.2, output: 0.8 },
+  "deepseek-v3": { input: 0.27, output: 1.1 },
+  "deepseek-r1": { input: 0.55, output: 2.19 },
+  "mistral-small": { input: 0.1, output: 0.3 },
+  "qwen3": { input: 0.3, output: 1.2 },
+  "command-a": { input: 2.5, output: 10 },
+  "nova-premier": { input: 2.5, output: 10 },
+  "ernie-4.5": { input: 1, output: 4 },
+};
+
+function getModelPrice(model: string): { input: number; output: number } {
+  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  const stripped = model.replace(/^[a-z0-9_-]+\//, "");
+  if (MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
+  const base = stripped.replace(/-(thinking-visible|thinking|latest|preview)$/g, "").replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  if (MODEL_PRICING[base]) return MODEL_PRICING[base];
+  for (const [key, val] of Object.entries(MODEL_PRICING)) {
+    if (stripped.startsWith(key) || base.startsWith(key)) return val;
+  }
+  return DEFAULT_PRICING;
+}
+
+function estimateModelCost(model: string, prompt: number, completion: number): number {
+  const p = getModelPrice(model);
+  return (prompt * p.input + completion * p.output) / 1_000_000;
+}
+
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("bg-card text-card-foreground rounded-xl border border-border/50 shadow-sm p-5", className)}>
@@ -86,7 +156,8 @@ export function StatsPage({
       .catch(() => setResetting(false));
   };
 
-  const allSubNodes = stats ? Object.entries(stats).filter(([l]) => l !== "local") : [];
+  const allNodes = stats ? Object.entries(stats) : [];
+  const allSubNodes = allNodes.filter(([l]) => l !== "local");
   const dynamicNodes = allSubNodes.filter(([, s]) => s.dynamic);
   const allSelected = allSubNodes.length > 0 && allSubNodes.every(([l]) => selected.has(l));
   const someSelected = selected.size > 0;
@@ -98,6 +169,18 @@ export function StatsPage({
     setSelected(allSelected ? new Set() : new Set(allSubNodes.map(([l]) => l)));
 
   const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString();
+
+  const totalModelCost = modelStats
+    ? Object.entries(modelStats).reduce((sum, [model, ms]) => sum + estimateModelCost(model, ms.promptTokens, ms.completionTokens), 0)
+    : null;
+
+  const totalModelInputCost = modelStats
+    ? Object.entries(modelStats).reduce((sum, [model, ms]) => sum + (ms.promptTokens * getModelPrice(model).input) / 1_000_000, 0)
+    : null;
+
+  const totalModelOutputCost = modelStats
+    ? Object.entries(modelStats).reduce((sum, [model, ms]) => sum + (ms.completionTokens * getModelPrice(model).output) / 1_000_000, 0)
+    : null;
 
   const estimateCostFallback = (prompt: number, completion: number) => {
     return (prompt * DEFAULT_PRICING.input + completion * DEFAULT_PRICING.output) / 1_000_000;
@@ -243,22 +326,49 @@ export function StatsPage({
             </Card>
 
              {/* Cost Estimate */}
-             <Card className="flex flex-col border-amber-500/10 shadow-sm border-t-2 border-t-amber-500 lg:col-span-2">
+             <Card className="flex flex-col border-amber-500/10 shadow-sm border-t-2 border-t-amber-500 lg:col-span-1">
               <div className="flex items-center gap-2 text-amber-500 mb-4 font-semibold text-sm">
-                <DollarSign size={16} /> 预估总开销
+                <DollarSign size={16} /> 预估开销
               </div>
-              <div className="flex flex-col md:flex-row md:items-end gap-4 md:gap-8 justify-between h-full">
+              <div className="flex flex-col gap-4 justify-between h-full">
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">总计 (近似)</div>
                   <div className="text-3xl font-bold font-mono tracking-tight text-amber-500">
-                    ${(estimateCostFallback(totals!.promptTokens, totals!.completionTokens)).toFixed(2)}
+                    ${(totalModelCost !== null ? totalModelCost : estimateCostFallback(totals!.promptTokens, totals!.completionTokens)).toFixed(2)}
                   </div>
                 </div>
-                <div className="text-xs text-muted-foreground mb-1 md:text-right w-full max-w-[200px] bg-secondary/50 p-2 rounded-md border border-border/50">
-                  <div className="flex justify-between mb-1"><span>输入开销:</span> <span>${((totals!.promptTokens * DEFAULT_PRICING.input / 1_000_000)).toFixed(2)}</span></div>
-                  <div className="flex justify-between"><span>输出开销:</span> <span>${((totals!.completionTokens * DEFAULT_PRICING.output / 1_000_000)).toFixed(2)}</span></div>
+                <div className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded-md border border-border/50">
+                  <div className="flex justify-between mb-1"><span>输入开销:</span> <span>${(totalModelInputCost !== null ? totalModelInputCost : ((totals!.promptTokens * DEFAULT_PRICING.input / 1_000_000))).toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>输出开销:</span> <span>${(totalModelOutputCost !== null ? totalModelOutputCost : ((totals!.completionTokens * DEFAULT_PRICING.output / 1_000_000))).toFixed(2)}</span></div>
                 </div>
               </div>
+            </Card>
+
+             {/* 按模型开销 */}
+             <Card className="flex flex-col border-purple-500/10 shadow-sm border-t-2 border-t-purple-500 lg:col-span-1">
+              <div className="flex items-center gap-2 text-purple-500 mb-4 font-semibold text-sm">
+                <Settings2 size={16} /> 按模型开销
+              </div>
+              {(() => {
+                if (!modelStats || Object.keys(modelStats).length === 0) {
+                  return <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>;
+                }
+                const sorted = Object.entries(modelStats)
+                  .filter(([, ms]) => ms.calls > 0)
+                  .map(([model, ms]) => ({ model, cost: estimateModelCost(model, ms.promptTokens, ms.completionTokens), calls: ms.calls }))
+                  .sort((a, b) => b.cost - a.cost);
+                if (sorted.length === 0) return <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>;
+                return (
+                  <div className="flex flex-col gap-2 max-h-[140px] overflow-y-auto pr-1">
+                    {sorted.map(({ model, cost, calls }) => (
+                      <div key={model} className="flex justify-between items-center text-[11px] gap-3">
+                        <span className="text-muted-foreground font-mono truncate flex-1" title={model}>{model}</span>
+                        <span className="text-foreground shrink-0">{calls}次</span>
+                        <span className="text-amber-500 font-semibold shrink-0">${cost.toFixed(4)}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </Card>
 
           </div>
@@ -289,28 +399,37 @@ export function StatsPage({
                     </div>
                  )}
 
-                {allSubNodes.map(([label, s]) => {
+                {allNodes.map(([label, s]) => {
                   const isEnabled = s.enabled !== false;
                   const isChecked = selected.has(label);
                   const isHealthy = s.health === "healthy";
+                  const isLocal = label === "local";
+                  
                   return (
                     <div 
                        key={label}
-                       onClick={() => toggleSelect(label)}
+                       onClick={() => !isLocal && toggleSelect(label)}
                        className={cn(
-                         "group relative bg-card border rounded-xl overflow-hidden transition-all duration-200 cursor-pointer shadow-sm",
-                         isChecked ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "border-border/60 hover:border-border",
+                         "group relative bg-card border rounded-xl overflow-hidden transition-all duration-200 shadow-sm",
+                         isLocal ? "border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.05)] bg-indigo-500/5 cursor-default" : "cursor-pointer",
+                         isChecked ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "hover:border-border/80 border-border/60",
                          !isEnabled && "opacity-60 bg-muted/30 hover:bg-muted/50"
                        )}
                     >
                       <div className="p-4 flex flex-col md:flex-row md:items-center gap-4">
                         {/* Title Row */}
                         <div className="flex items-center gap-3 w-full md:w-auto">
-                           <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(label)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded text-primary focus:ring-primary/20 cursor-pointer" />
+                           {!isLocal ? (
+                             <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(label)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded text-primary focus:ring-primary/20 cursor-pointer" />
+                           ) : (
+                             <div className="w-4 h-4" />
+                           )}
                            <div className={cn("w-2 h-2 rounded-full flex-shrink-0 animate-in zoom-in", !isEnabled ? "bg-muted-foreground" : isHealthy ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" : "bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]")}/>
                            <div className="flex items-center gap-2 overflow-hidden flex-1 md:w-48">
-                              <span className="font-mono font-bold text-sm truncate">{label}</span>
-                              {s.dynamic ? (
+                              <span className={cn("font-mono font-bold text-sm truncate", isLocal && "text-indigo-500")}>{label}</span>
+                              {isLocal ? (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex-shrink-0">本地进程</span>
+                              ) : s.dynamic ? (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex-shrink-0">动态</span>
                               ) : (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex-shrink-0">ENV</span>
@@ -336,16 +455,18 @@ export function StatsPage({
                            
                            {/* Actions */}
                            <div className="flex items-center gap-1.5 ml-2">
-                             <button
-                               onClick={(e) => { e.stopPropagation(); onToggleBackend(label, !isEnabled); }}
-                               className={cn(
-                                 "px-2.5 py-1 text-xs rounded-md border transition-colors",
-                                 isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20"
-                               )}
-                             >
-                               {isEnabled ? "禁用" : "启用"}
-                             </button>
-                             {s.dynamic && (
+                             {!isLocal && (
+                               <button
+                                 onClick={(e) => { e.stopPropagation(); onToggleBackend(label, !isEnabled); }}
+                                 className={cn(
+                                   "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                                   isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20"
+                                 )}
+                               >
+                                 {isEnabled ? "禁用" : "启用"}
+                               </button>
+                             )}
+                             {s.dynamic && !isLocal && (
                                 <button
                                   onClick={(e) => { e.stopPropagation(); onRemoveBackend(label); }}
                                   className="p-1.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-colors"
