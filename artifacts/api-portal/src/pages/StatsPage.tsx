@@ -377,7 +377,7 @@ export function StatsPage({
           <div className="mt-8">
             <SectionTitle>节点统计与管理</SectionTitle>
             
-            {allSubNodes.length === 0 ? (
+            {allNodes.length === 0 ? (
               <Card className="py-12 border-dashed bg-transparent shadow-none border-border">
                 <div className="flex flex-col items-center justify-center text-center">
                   <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground mb-3"><Server size={24} /></div>
