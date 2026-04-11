@@ -131,19 +131,21 @@ export function HomePage({
 
       {/* Base URL */}
       <Card>
-        <SectionTitle>Base URL <span className="ml-2 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-normal normal-case">DEV</span></SectionTitle>
+        <SectionTitle>Base URL {displayUrl.includes(".replit.dev") && <span className="ml-2 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-normal normal-case">DEV</span>}</SectionTitle>
         <div className="flex items-center gap-3 w-full">
           <div className="flex-1 bg-secondary/50 border border-border/60 rounded-lg p-3 font-mono text-sm text-primary overflow-hidden text-ellipsis whitespace-nowrap shadow-inner">
             {displayUrl}
           </div>
           <CopyButton text={displayUrl} label="复制 URL" />
         </div>
-        <div className="mt-4 flex items-start gap-3 bg-secondary/30 p-3 rounded-lg border border-border/40">
-           <Info size={16} className="text-muted-foreground flex-shrink-0 mt-0.5" />
-           <p className="text-[13px] text-muted-foreground leading-relaxed m-0">
-             当前显示为开发预览地址。将本项目 <strong className="text-foreground font-medium">Publish（发布）</strong> 后，请以生产环境域名（<code className="text-primary bg-primary/5 px-1 py-0.5 rounded mx-1">https://your-app.replit.app</code>）作为正式 Base URL 使用。
-           </p>
-        </div>
+        {displayUrl.includes(".replit.dev") && (
+          <div className="mt-4 flex items-start gap-3 bg-secondary/30 p-3 rounded-lg border border-border/40">
+             <Info size={16} className="text-muted-foreground flex-shrink-0 mt-0.5" />
+             <p className="text-[13px] text-muted-foreground leading-relaxed m-0">
+               当前显示为开发预览地址。将本项目 <strong className="text-foreground font-medium">Publish（发布）</strong> 后，请以生产环境域名（<code className="text-primary bg-primary/5 px-1 py-0.5 rounded mx-1">https://your-app.replit.app</code>）作为正式 Base URL 使用。
+             </p>
+          </div>
+        )}
       </Card>
 
       {/* SillyTavern */}
