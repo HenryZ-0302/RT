@@ -7,9 +7,10 @@ import {
   ChevronRight,
   ShieldAlert,
   Power,
-  Activity,
-  PlayCircle,
-  Loader2
+  Copy,
+  Check,
+  Terminal,
+  BookOpen
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -159,50 +160,10 @@ export function ModelsPage({
   onToggleModel: (id: string, enabled: boolean) => void;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    openai: true, anthropic: true, gemini: true, openrouter: true,
+    openai: false, anthropic: false, gemini: false, openrouter: false,
   });
   const [filter, setFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [searchQuery, setSearchQuery] = useState("");
-  
-  const [testModel, setTestModel] = useState("");
-  const [testState, setTestState] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [testResult, setTestResult] = useState<{ time?: number; status?: number; data?: any; error?: string }>({});
-
-  const runTest = async (modelToTest: string = testModel) => {
-    const targetModel = modelToTest || testModel;
-    if (!targetModel) return;
-    
-    setTestModel(targetModel);
-    setTestState("loading");
-    setTestResult({});
-    const start = Date.now();
-    try {
-      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: [{role: "user", content: "test, reply ok"}],
-          max_tokens: 10
-        })
-      });
-      const data = await res.json().catch(() => null);
-      const time = Date.now() - start;
-      if (res.ok) {
-        setTestState("success");
-        setTestResult({ time, status: res.status, data });
-      } else {
-        setTestState("error");
-        setTestResult({ time, status: res.status, data });
-      }
-    } catch (e: any) {
-      setTestState("error");
-      setTestResult({ error: e.message });
-    }
-  };
 
   const allGroups = [
     { key: "openai", title: "OpenAI", models: OPENAI_MODELS, provider: "openai" as Provider },
@@ -269,56 +230,6 @@ export function ModelsPage({
             ))}
           </div>
         </div>
-      </Card>
-
-      {/* Healthcheck Test Card */}
-      <Card className="bg-secondary/10 border-blue-500/20">
-        <div className="flex flex-col md:flex-row md:items-center gap-4">
-          <div className="flex-1">
-            <h3 className="font-bold flex items-center gap-2 text-blue-500"><Activity size={18} /> 连通性测试</h3>
-            <p className="text-xs text-muted-foreground mt-1">给选定的模型发送一条极短消息，验证上游通道及密钥连通性。</p>
-          </div>
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <select 
-              value={testModel} 
-              onChange={e => setTestModel(e.target.value)}
-              className="bg-background border border-border rounded-lg text-sm px-3 py-1.5 focus:ring-2 focus:ring-primary/20 outline-none flex-1 md:w-56"
-            >
-              <option value="" disabled>选择要测试的模型...</option>
-              {modelStatus.map(m => (
-                <option key={m.id} value={m.id}>{m.id} {m.enabled ? "" : "(已禁用)"}</option>
-              ))}
-            </select>
-            <button 
-              onClick={() => runTest()}
-              disabled={!testModel || testState === "loading"}
-              className="bg-primary text-primary-foreground px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2 flex-shrink-0"
-            >
-              {testState === "loading" ? <Loader2 size={16} className="animate-spin" /> : <PlayCircle size={16} />}
-              测试
-            </button>
-          </div>
-        </div>
-
-        {testState !== "idle" && (
-          <div className={cn("mt-4 p-3 rounded-lg border text-xs font-mono transition-all animate-in fade-in slide-in-from-top-2", 
-            testState === "success" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400" : 
-            testState === "loading" ? "bg-secondary text-muted-foreground border-border" : 
-            "bg-destructive/10 border-destructive/20 text-destructive"
-          )}>
-            {testState === "loading" ? "正在等待上游响应..." : (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-4">
-                  <span className="font-bold">Status: <span className={testResult.status === 200 ? "text-emerald-500" : "text-destructive"}>{testResult.status ?? "ERR"}</span></span>
-                  <span className="font-bold">Latency: {testResult.time ? `${testResult.time}ms` : "--"}</span>
-                </div>
-                <div className="bg-background/50 p-2.5 rounded text-[11px] max-h-40 overflow-y-auto whitespace-pre-wrap break-all border border-border/50">
-                   {testResult.error ? testResult.error : JSON.stringify(testResult.data, null, 2)}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </Card>
 
       {/* Group Lists */}
@@ -424,18 +335,7 @@ export function ModelsPage({
                                {m.badge && <Badge variant={m.badge} />}
                             </div>
                           </div>
-                          <div className="ml-auto pl-4 flex items-center gap-3">
-                            <button
-                              onClick={(e) => { 
-                                e.stopPropagation(); 
-                                runTest(m.id);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                              className="text-muted-foreground hover:text-blue-500 transition-colors p-1 hover:bg-blue-500/10 rounded"
-                              title="进行连通性测试"
-                            >
-                              <PlayCircle size={15} />
-                            </button>
+                          <div className="ml-auto pl-4 flex items-center">
                             <ModelToggle enabled={enabled} onChange={() => onToggleModel(m.id, !enabled)} />
                           </div>
                         </div>
