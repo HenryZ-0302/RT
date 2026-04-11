@@ -1,6 +1,6 @@
 {
-  "version": "1.1.7",
+  "version": "1.1.8",
   "name": "Unified Service Layer",
-  "releaseDate": "2026-04-08",
-  "releaseNotes": "v1.1.7 — 统一服务层中性包装、服务别名路由、访问密钥兼容"
+  "releaseDate": "2026-04-10",
+  "releaseNotes": "v1.1.8 — 补充模型列表鉴权兼容、Claude thinking 路径修复、Claude Opus 4.1 上限修复，并将门户调整为前置服务密钥验证；相对 v1.1.7 更偏向接入兼容性、请求稳定性与入口收口。"
 }

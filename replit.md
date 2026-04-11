@@ -1,4 +1,9 @@
-# Unified Service Layer — V1.1.7
+# Unified Service Layer — V1.1.8
+
+本次版本重点：
+- 补充模型列表鉴权兼容，改善聊天客户端拉取模型列表的成功率
+- 修复 Claude thinking 路径与 Opus 4.1 输出上限问题
+- 门户改为前置服务密钥验证，并继续精简站内入口
 
 ## Project Summary
 

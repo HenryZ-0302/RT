@@ -2,7 +2,6 @@
 import SetupWizard from "./components/SetupWizard";
 import UpdateBadge from "./components/UpdateBadge";
 import PageLogs from "./components/PageLogs";
-import PageDocs from "./components/PageDocs";
 import {
   getStoredServiceKey,
   servicePaths,
@@ -264,14 +263,14 @@ function PageHome({
         {(() => {
           const releases = [
             {
-              version: "v1.1.7",
-              date: "2026-04-08",
+              version: "v1.1.8",
+              date: "2026-04-10",
               items: [
-                { zh: "按模型定价：预估开销改为根据每个模型的官方价格（输入/输出分别定价）精确计算，涵盖 47 个模型", en: "Per-model pricing: cost estimation now uses official per-model input/output rates for 47 models across all 4 providers" },
-                { zh: "按模型统计：后端新增 per-model token 统计（调用次数 / 输入 / 输出 token），持久化到 usage_stats.json", en: "Per-model stats: backend now tracks calls, prompt tokens, and completion tokens per model; persisted to usage_stats.json" },
-                { zh: "「按模型开销」卡片：统计面板第 6 格改为按模型维度展示费用排行，显示每个模型的调用次数和精确费用", en: "Per-model cost card: 6th summary card now shows cost breakdown by model (sorted by cost desc) with call count and precise cost" },
-                { zh: "定价覆盖：OpenAI GPT-5/4.1/4o/o-series、Anthropic Claude Opus/Sonnet/Haiku 4.x/3.x、Gemini 3.1/3/2.5/2.0/1.5、OpenRouter Grok/Llama/DeepSeek/Mistral/Qwen 等全部覆盖", en: "Pricing coverage: OpenAI GPT-5/4.1/4o/o-series, Anthropic Claude 4.x/3.x, Gemini 3.1–1.5, OpenRouter Grok/Llama/DeepSeek/Mistral/Qwen and more" },
-                { zh: "模型名智能匹配：自动剥离 provider 前缀（anthropic/、x-ai/ 等）和后缀（-thinking、-preview、日期戳），确保定价命中率", en: "Smart model name matching: strips provider prefixes and suffixes (-thinking, -preview, date stamps) for reliable pricing lookup" },
+                { zh: "修复聊天客户端获取模型列表的兼容问题，/v1/models 现在兼容更多鉴权传法。" },
+                { zh: "修复 Claude thinking 路径：4.6 系列改用更合适的 thinking 方式，并补齐相关请求限制处理。" },
+                { zh: "修复 Claude Opus 4.1 的输出上限，避免 max_tokens 超限导致上游直接报错。" },
+                { zh: "门户改成进站前先验证服务密钥，站内移除重复密钥入口，导航精简为统计、模型、日志、设置。" },
+                { zh: "相对 1.1.7，这一版不再扩展外观包装，重点改为接入兼容性、模型请求稳定性和门户入口收口。" },
               ],
             },
           ];
@@ -288,7 +287,6 @@ function PageHome({
                     <span style={{ color: "#4f46e5", marginTop: "2px", flexShrink: 0, fontSize: "11px" }}>▸</span>
                     <div>
                       <div style={{ fontSize: "12.5px", color: "#94a3b8", lineHeight: "1.5" }}>{item.zh}</div>
-                      <div style={{ fontSize: "11px", color: "#334155", lineHeight: "1.5", fontStyle: "italic" }}>{item.en}</div>
                     </div>
                   </div>
                 ))}
@@ -352,16 +350,6 @@ function PageHome({
       {/* Access + SillyTavern */}
       <Card>
         <SectionTitle>访问密码 & 设置</SectionTitle>
-        <div style={{ marginBottom: "14px" }}>
-          <div style={{ fontSize: "12px", color: "#64748b", display: "block", marginBottom: "6px" }}>服务密钥状态</div>
-          <div style={{
-            width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: "8px", padding: "10px 12px", color: "#cbd5e1",
-            fontSize: "12.5px", lineHeight: "1.6", boxSizing: "border-box",
-          }}>
-            {apiKey ? "当前会话已通过服务密钥验证，站内不再提供修改入口。" : "尚未完成服务密钥验证。"}
-          </div>
-        </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, color: "#cbd5e1", fontSize: "13.5px", marginBottom: "3px" }}>SillyTavern 兼容模式</div>
@@ -1862,7 +1850,7 @@ function PageModels({
 // Main App
 // ---------------------------------------------------------------------------
 
-type Tab = "home" | "stats" | "models" | "logs" | "endpoints";
+type Tab = "stats" | "models" | "logs" | "home";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("home");
@@ -2133,11 +2121,10 @@ export default function App() {
   }, [baseUrl]);
 
   const TABS: { id: Tab; label: string; icon: string }[] = [
-    { id: "home", label: "概览", icon: "&#127968;" },
     { id: "stats", label: "统计", icon: "&#128200;" },
     { id: "models", label: "模型", icon: "&#129302;" },
     { id: "logs", label: "日志", icon: "&#128203;" },
-    { id: "endpoints", label: "文档", icon: "&#128214;" },
+    { id: "home", label: "设置", icon: "&#9881;" },
   ];
 
   if (!gateUnlocked) {
@@ -2347,7 +2334,6 @@ export default function App() {
           <PageHome
             displayUrl={displayUrl}
             apiKey={apiKey}
-            setApiKey={setApiKey}
             sillyTavernMode={sillyTavernMode}
             stLoading={stLoading}
             onToggleSTMode={toggleSTMode}
@@ -2388,10 +2374,6 @@ export default function App() {
         {tab === "logs" && (
           <PageLogs baseUrl={baseUrl} apiKey={apiKey} />
         )}
-        {tab === "endpoints" && (
-          <PageDocs />
-        )}
-
         <div style={{ marginTop: "32px", textAlign: "center", color: "#1e293b", fontSize: "12px" }}>
           Unified Service Layer
         </div>
