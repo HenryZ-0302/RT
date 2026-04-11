@@ -410,13 +410,14 @@ export function StatsPage({
                        key={label}
                        onClick={() => !isLocal && toggleSelect(label)}
                        className={cn(
-                         "group relative bg-card border rounded-xl overflow-hidden transition-all duration-200 shadow-sm",
+                         "group relative bg-card border rounded-xl overflow-hidden transition-all duration-200 shadow-sm flex flex-col",
                          isLocal ? "border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.05)] bg-indigo-500/5 cursor-default" : "cursor-pointer",
                          isChecked ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "hover:border-border/80 border-border/60",
                          !isEnabled && "opacity-60 bg-muted/30 hover:bg-muted/50"
                        )}
                     >
-                      <div className="p-4 flex flex-col md:flex-row md:items-center gap-4">
+                      {/* Top Bar */}
+                      <div className="p-4 pb-3 flex flex-col md:flex-row md:items-center gap-4">
                         {/* Title Row */}
                         <div className="flex items-center gap-3 w-full md:w-auto">
                            {!isLocal ? (
@@ -441,41 +442,65 @@ export function StatsPage({
                         <div className="font-mono text-xs text-muted-foreground truncate flex-1 md:max-w-xs xl:max-w-md hidden md:block">
                            {s.url ?? label}
                         </div>
-
-                        {/* Minimal Stats */}
-                        <div className="flex items-center gap-6 ml-auto mt-2 md:mt-0 text-sm pl-7 md:pl-0">
-                           <div className="flex flex-col items-end">
-                             <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Calls</span>
-                             <span className="font-mono font-medium">{s.calls}</span>
-                           </div>
-                           <div className="flex flex-col items-end hidden sm:flex">
-                             <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Errors</span>
-                             <span className={cn("font-mono font-medium", s.errors > 0 ? "text-destructive" : "text-muted-foreground")}>{s.errors}</span>
-                           </div>
                            
-                           {/* Actions */}
-                           <div className="flex items-center gap-1.5 ml-2">
-                             {!isLocal && (
-                               <button
-                                 onClick={(e) => { e.stopPropagation(); onToggleBackend(label, !isEnabled); }}
-                                 className={cn(
-                                   "px-2.5 py-1 text-xs rounded-md border transition-colors",
-                                   isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20"
-                                 )}
-                               >
-                                 {isEnabled ? "禁用" : "启用"}
-                               </button>
-                             )}
-                             {s.dynamic && !isLocal && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); onRemoveBackend(label); }}
-                                  className="p-1.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-colors"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                             )}
-                           </div>
+                        {/* Actions */}
+                        <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
+                          {!isLocal && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onToggleBackend(label, !isEnabled); }}
+                              className={cn(
+                                "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                                isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20"
+                              )}
+                            >
+                              {isEnabled ? "禁用" : "启用"}
+                            </button>
+                          )}
+                          {s.dynamic && !isLocal && (
+                             <button
+                               onClick={(e) => { e.stopPropagation(); onRemoveBackend(label); }}
+                               className="p-1.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-colors"
+                             >
+                               <Trash2 size={13} />
+                             </button>
+                          )}
                         </div>
+                      </div>
+
+                      {/* Expanded Stats Grid */}
+                      <div className="px-5 py-3 md:pt-4 md:pb-4 border-t border-border/40 bg-secondary/10 grid grid-cols-4 md:grid-cols-4 xl:grid-cols-8 gap-y-4 gap-x-3 items-center">
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">请求</span>
+                           <span className="text-sm font-mono font-medium text-indigo-500 dark:text-indigo-400">{s.calls}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">流式</span>
+                           <span className="text-sm font-mono font-medium text-blue-500 dark:text-blue-400">{s.streamingCalls ?? 0}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">错误</span>
+                           <span className={cn("text-sm font-mono font-medium", s.errors > 0 ? "text-destructive" : "text-green-500 dark:text-green-400")}>{s.errors}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输入 Token</span>
+                           <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(s.promptTokens)}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输出 Token</span>
+                           <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(s.completionTokens)}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">均耗时</span>
+                           <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{s.calls > 0 ? `${s.avgDurationMs}ms` : "--"}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">首 Token</span>
+                           <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{s.avgTtftMs ? `${s.avgTtftMs}ms` : "--"}</span>
+                         </div>
+                         <div className="flex flex-col">
+                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">开销</span>
+                           <span className="text-sm font-mono font-medium text-amber-500 dark:text-amber-400">${((s.promptTokens * DEFAULT_PRICING.input + s.completionTokens * DEFAULT_PRICING.output) / 1_000_000).toFixed(2)}</span>
+                         </div>
                       </div>
                     </div>
                   );
