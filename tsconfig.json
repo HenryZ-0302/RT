@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    {
+      "path": "./artifacts/api-server"
+    },
+    {
+      "path": "./artifacts/api-portal"
+    }
+  ]
+}
