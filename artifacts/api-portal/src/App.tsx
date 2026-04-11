@@ -208,7 +208,7 @@ export default function App() {
     const current = { ...routing, [field]: value };
     setRouting(current);
     try {
-      await fetch(`${baseUrl}/api/service/routing`, {
+      await fetch(servicePaths.routing(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
@@ -220,7 +220,7 @@ export default function App() {
   const fetchModels = useCallback(async (key: string) => {
     if (!key) return;
     try {
-      const r = await fetch(`${baseUrl}/api/service/config/models`, { headers: { Authorization: `Bearer ${key}` } });
+      const r = await fetch(servicePaths.models(baseUrl), { headers: { Authorization: `Bearer ${key}` } });
       if (!r.ok) return;
       const d = await r.json() as { models: ModelStatus[]; summary: Record<string, GroupSummary> };
       setModelStatus(d.models || []);
@@ -237,7 +237,7 @@ export default function App() {
       return { ...prev, [provider]: { total: grp.total, enabled: enabled ? grp.total : 0 } };
     });
     try {
-      await fetch(`${baseUrl}/api/service/config/models`, {
+      await fetch(servicePaths.models(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ provider, enabled }),
@@ -258,7 +258,7 @@ export default function App() {
       return { ...prev, [m.provider]: { total: grp.total, enabled: Math.max(0, Math.min(grp.total, grp.enabled + delta)) } };
     });
     try {
-      await fetch(`${baseUrl}/api/service/config/models`, {
+      await fetch(servicePaths.models(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [id], enabled }),
