@@ -33,7 +33,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
       <div className="min-h-screen bg-background text-foreground flex flex-col pt-12 items-center relative transition-colors duration-300">
         <div className="absolute top-6 right-6">
            <button 
-             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} 
+             onClick={() => setTheme((theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? 'light' : 'dark')} 
              className="p-2 rounded-full border border-border bg-card hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground shadow-sm"
            >
               {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
@@ -123,7 +123,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
 
            <div className="flex items-center gap-4">
              <button
-               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+               onClick={() => setTheme((theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? 'light' : 'dark')}
                className="h-9 w-9 rounded-full border border-border bg-background hover:bg-secondary text-muted-foreground hover:text-foreground transition-all flex items-center justify-center shadow-sm"
                aria-label="Toggle theme"
              >
