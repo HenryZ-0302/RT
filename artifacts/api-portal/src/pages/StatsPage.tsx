@@ -115,7 +115,7 @@ export function StatsPage({
   baseUrl: string;
   apiKey: string;
   stats: Record<string, BackendStat> | null;
-  statsError: false | "auth" | "server";
+  statsError: false | "auth" | "server" | "network";
   onRefresh: () => void;
   addUrl: string;
   setAddUrl: (u: string) => void;
@@ -243,6 +243,11 @@ export function StatsPage({
           <div className="text-xs text-muted-foreground/80">
             如果忘记了密码，请在环境 Secrets 面板中查看 <code className="bg-destructive/10 text-destructive px-1 py-0.5 rounded ml-1">SERVICE_ACCESS_KEY</code>
           </div>
+        </Card>
+      ) : statsError === "network" ? (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <div className="font-semibold text-amber-600 mb-1">网络波动，统计暂时加载失败</div>
+          <div className="text-sm text-muted-foreground">这次失败更像是连接抖动或超时，不代表 API Key 错误。你可以直接点右上角“刷新”再试一次。</div>
         </Card>
       ) : !stats ? (
         <Card><div className="flex justify-center py-6"><Activity size={24} className="animate-pulse text-muted-foreground" /></div></Card>

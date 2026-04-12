@@ -15,6 +15,12 @@ type BackendStat = { calls: number; errors: number; streamingCalls: number; prom
 type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
 interface ModelStatus { id: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
+type MetricsResponse = {
+  stats?: Record<string, Record<string, unknown>>;
+  modelStats?: Record<string, ModelStat>;
+  routing?: { localEnabled: boolean; localFallback: boolean; fakeStream: boolean };
+};
+type DataError = false | "auth" | "server" | "network";
 
 export default function App() {
   const [online, setOnline] = useState<boolean | null>(null);
@@ -29,7 +35,7 @@ export default function App() {
   const [showWizard, setShowWizard] = useState(false);
   const [stats, setStats] = useState<Record<string, BackendStat> | null>(null);
   const [modelStats, setModelStats] = useState<Record<string, ModelStat> | null>(null);
-  const [statsError, setStatsError] = useState<false | "auth" | "server">(false);
+  const [statsError, setStatsError] = useState<DataError>(false);
   const [routing, setRouting] = useState<{ localEnabled: boolean; localFallback: boolean; fakeStream: boolean }>({ localEnabled: true, localFallback: true, fakeStream: true });
   const [addUrl, setAddUrl] = useState("");
   const [addState, setAddState] = useState<"idle" | "loading" | "ok" | "err">("idle");
@@ -39,6 +45,17 @@ export default function App() {
 
   const baseUrl = window.location.origin;
   const displayUrl: string = (import.meta.env.VITE_BASE_URL as string | undefined) ?? window.location.origin;
+
+  const applyMetricsPayload = useCallback((payload: MetricsResponse) => {
+    const parsed: Record<string, BackendStat> = {};
+    for (const [k, v] of Object.entries(payload.stats ?? {})) {
+      parsed[k] = { ...(v as unknown as BackendStat), streamingCalls: (v.streamingCalls as number) ?? 0 };
+    }
+    setStats(parsed);
+    setStatsError(false);
+    setModelStats(payload.modelStats && typeof payload.modelStats === "object" ? payload.modelStats : null);
+    if (payload.routing) setRouting(payload.routing);
+  }, []);
   
   const checkHealth = useCallback(async () => {
     try {
@@ -99,9 +116,11 @@ export default function App() {
         return false;
       }
 
+      const data = await response.json() as MetricsResponse;
       setApiKey(trimmed);
       setGateKey(trimmed);
       storeServiceKey(trimmed);
+      applyMetricsPayload(data);
       setGateUnlocked(true);
       setGateReady(true);
       return true;
@@ -113,7 +132,7 @@ export default function App() {
     } finally {
       setGateLoading(false);
     }
-  }, [baseUrl]);
+  }, [applyMetricsPayload, baseUrl]);
 
   const fetchStats = useCallback(async (key: string) => {
     if (!key) { setStats(null); setModelStats(null); setStatsError(false); return; }
@@ -123,16 +142,12 @@ export default function App() {
         setStatsError(r.status === 500 ? "server" : "auth");
         return;
       }
-      const d = await r.json();
-      const parsed: Record<string, BackendStat> = {};
-      for (const [k, v] of Object.entries(d.stats as Record<string, Record<string, unknown>>)) {
-        parsed[k] = { ...(v as unknown as BackendStat), streamingCalls: (v.streamingCalls as number) ?? 0 };
-      }
-      setStats(parsed); setStatsError(false);
-      setModelStats(d.modelStats && typeof d.modelStats === "object" ? d.modelStats as Record<string, ModelStat> : null);
-      if (d.routing) setRouting(d.routing);
-    } catch { setStatsError("auth"); }
-  }, [baseUrl]);
+      const d = await r.json() as MetricsResponse;
+      applyMetricsPayload(d);
+    } catch {
+      setStatsError("network");
+    }
+  }, [applyMetricsPayload, baseUrl]);
 
   const addBackend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,7 +290,6 @@ export default function App() {
   }, [verifyServiceKey]);
   useEffect(() => {
     if (!gateUnlocked) return;
-    fetchStats(apiKey);
     fetchModels(apiKey);
     const t = setInterval(() => { fetchStats(apiKey); fetchModels(apiKey); }, 5 * 60 * 1000);
     return () => clearInterval(t);
