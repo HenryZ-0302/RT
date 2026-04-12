@@ -12,8 +12,8 @@ import { getStoredServiceKey, servicePaths, storeServiceKey } from "./lib/servic
 
 // Define the types that App needs for State management
 type BackendStat = { calls: number; errors: number; streamingCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; avgDurationMs: number; avgTtftMs: number | null; health: string; url?: string; dynamic?: boolean; enabled?: boolean };
-type ModelStat = { calls: number; promptTokens: number; completionTokens: number };
-interface ModelStatus { id: string; provider: string; enabled: boolean }
+type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
+interface ModelStatus { id: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
 
 export default function App() {
@@ -227,19 +227,19 @@ export default function App() {
     } catch {}
   }, [baseUrl]);
 
-  const toggleModelProvider = async (provider: string, enabled: boolean) => {
+  const toggleModelGroup = async (group: string, enabled: boolean) => {
     // Optimistic update
-    setModelStatus((prev) => prev.map((m) => m.provider === provider ? { ...m, enabled } : m));
+    setModelStatus((prev) => prev.map((m) => m.group === group ? { ...m, enabled } : m));
     setModelSummary((prev) => {
-      const grp = prev[provider];
+      const grp = prev[group];
       if (!grp) return prev;
-      return { ...prev, [provider]: { total: grp.total, enabled: enabled ? grp.total : 0 } };
+      return { ...prev, [group]: { total: grp.total, enabled: enabled ? grp.total : 0 } };
     });
     try {
       await fetch(servicePaths.models(baseUrl), {
         method: "PATCH",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, enabled }),
+        body: JSON.stringify({ group, enabled }),
       });
     } catch {}
     fetchModels(apiKey);
@@ -251,10 +251,10 @@ export default function App() {
     setModelSummary((prev) => {
       const m = modelStatus.find((ms) => ms.id === id);
       if (!m) return prev;
-      const grp = prev[m.provider];
+      const grp = prev[m.group];
       if (!grp) return prev;
       const delta = enabled ? 1 : -1;
-      return { ...prev, [m.provider]: { total: grp.total, enabled: Math.max(0, Math.min(grp.total, grp.enabled + delta)) } };
+      return { ...prev, [m.group]: { total: grp.total, enabled: Math.max(0, Math.min(grp.total, grp.enabled + delta)) } };
     });
     try {
       await fetch(servicePaths.models(baseUrl), {
@@ -388,7 +388,7 @@ export default function App() {
                 baseUrl={baseUrl} apiKey={apiKey}
                 modelStatus={modelStatus} summary={modelSummary}
                 onRefresh={() => fetchModels(apiKey)}
-                onToggleProvider={toggleModelProvider}
+                onToggleProvider={toggleModelGroup}
                 onToggleModel={toggleModelById}
               />
             </Route>

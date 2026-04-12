@@ -41,6 +41,11 @@ const GEMINI_BASE_MODELS = [
   "gemini-2.5-pro", "gemini-2.5-flash",
 ];
 
+const GEMINI_IMAGE_MODELS = [
+  "gemini-3-pro-image-preview",
+  "gemini-2.5-flash-image",
+];
+
 const OPENROUTER_FEATURED = [
   "x-ai/grok-4.20", "x-ai/grok-4.1-fast", "x-ai/grok-4-fast",
   "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
@@ -50,24 +55,95 @@ const OPENROUTER_FEATURED = [
   "cohere/command-a", "amazon/nova-premier-v1", "baidu/ernie-4.5-300b-a47b",
 ];
 
-const OPENAI_MODELS = OPENAI_CHAT_MODELS.map((id) => ({ id, description: "OpenAI model" }));
-const CLAUDE_MODELS = ANTHROPIC_BASE_MODELS.flatMap((id) => [
-  { id, description: "Anthropic Claude model" },
-  { id: `${id}-thinking`, description: "Extended thinking (hidden)" },
-]);
+type RegisteredProvider = "openai" | "anthropic" | "gemini" | "openrouter";
+type ModelCapability = "chat" | "image";
+type ModelGroup = "openai" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
+type ModelTestMode = "chat" | "image";
 
-const ALL_MODELS = [
-  ...OPENAI_CHAT_MODELS.map((id) => ({ id })),
-  ...OPENAI_THINKING_ALIASES.map((id) => ({ id })),
-  ...ANTHROPIC_BASE_MODELS.flatMap((id) => [
-    { id },
-    { id: `${id}-thinking` },
-  ]),
-  ...GEMINI_BASE_MODELS.flatMap((id) => [
-    { id }, { id: `${id}-thinking` },
-  ]),
-  ...OPENROUTER_FEATURED.map((id) => ({ id })),
+type RegisteredModel = {
+  id: string;
+  provider: RegisteredProvider;
+  capability: ModelCapability;
+  group: ModelGroup;
+  testMode: ModelTestMode;
+  description?: string;
+};
+
+const REGISTERED_MODELS: RegisteredModel[] = [
+  ...OPENAI_CHAT_MODELS.map((id) => ({
+    id,
+    provider: "openai" as const,
+    capability: "chat" as const,
+    group: "openai" as const,
+    testMode: "chat" as const,
+    description: "OpenAI model",
+  })),
+  ...OPENAI_THINKING_ALIASES.map((id) => ({
+    id,
+    provider: "openai" as const,
+    capability: "chat" as const,
+    group: "openai" as const,
+    testMode: "chat" as const,
+    description: "OpenAI thinking alias",
+  })),
+  ...ANTHROPIC_BASE_MODELS.flatMap((id) => ([
+    {
+      id,
+      provider: "anthropic" as const,
+      capability: "chat" as const,
+      group: "anthropic" as const,
+      testMode: "chat" as const,
+      description: "Anthropic Claude model",
+    },
+    {
+      id: `${id}-thinking`,
+      provider: "anthropic" as const,
+      capability: "chat" as const,
+      group: "anthropic" as const,
+      testMode: "chat" as const,
+      description: "Extended thinking (hidden)",
+    },
+  ])),
+  ...GEMINI_BASE_MODELS.flatMap((id) => ([
+    {
+      id,
+      provider: "gemini" as const,
+      capability: "chat" as const,
+      group: "gemini" as const,
+      testMode: "chat" as const,
+      description: "Gemini chat model",
+    },
+    {
+      id: `${id}-thinking`,
+      provider: "gemini" as const,
+      capability: "chat" as const,
+      group: "gemini" as const,
+      testMode: "chat" as const,
+      description: "Gemini thinking alias",
+    },
+  ])),
+  ...GEMINI_IMAGE_MODELS.map((id) => ({
+    id,
+    provider: "gemini" as const,
+    capability: "image" as const,
+    group: "gemini_image" as const,
+    testMode: "image" as const,
+    description: "Gemini image generation model",
+  })),
+  ...OPENROUTER_FEATURED.map((id) => ({
+    id,
+    provider: "openrouter" as const,
+    capability: "chat" as const,
+    group: "openrouter" as const,
+    testMode: "chat" as const,
+    description: "OpenRouter model",
+  })),
 ];
+
+const MODEL_REGISTRY = new Map(REGISTERED_MODELS.map((model) => [model.id, model]));
+const ALL_MODELS = REGISTERED_MODELS.map((model) => ({ id: model.id, description: model.description }));
+const CHAT_MODEL_IDS = new Set(REGISTERED_MODELS.filter((m) => m.capability === "chat").map((m) => m.id));
+const IMAGE_MODEL_IDS = new Set(REGISTERED_MODELS.filter((m) => m.capability === "image").map((m) => m.id));
 
 // ---------------------------------------------------------------------------
 // Backend pool — round-robin across local account + multiple friend proxies
@@ -104,19 +180,9 @@ function saveDynamicBackends(list: DynamicBackend[]): void {
 type ModelProvider = "openai" | "anthropic" | "gemini" | "openrouter";
 
 // Build a complete id → provider lookup from the model constants above
-const MODEL_PROVIDER_MAP = new Map<string, ModelProvider>();
-
-for (const id of OPENAI_CHAT_MODELS) { MODEL_PROVIDER_MAP.set(id, "openai"); }
-for (const id of OPENAI_THINKING_ALIASES) { MODEL_PROVIDER_MAP.set(id, "openai"); }
-for (const base of ANTHROPIC_BASE_MODELS) {
-  MODEL_PROVIDER_MAP.set(base, "anthropic");
-  MODEL_PROVIDER_MAP.set(`${base}-thinking`, "anthropic");
-}
-for (const base of GEMINI_BASE_MODELS) {
-  MODEL_PROVIDER_MAP.set(base, "gemini");
-  MODEL_PROVIDER_MAP.set(`${base}-thinking`, "gemini");
-}
-for (const id of OPENROUTER_FEATURED) { MODEL_PROVIDER_MAP.set(id, "openrouter"); }
+const MODEL_PROVIDER_MAP = new Map<string, ModelProvider>(
+  REGISTERED_MODELS.map((model) => [model.id, model.provider]),
+);
 
 let disabledModels: Set<string> = new Set<string>();
 
@@ -159,6 +225,18 @@ function saveRoutingSettings(): void {
 
 function isModelEnabled(id: string): boolean {
   return !disabledModels.has(id);
+}
+
+function getRegisteredModel(id: string | undefined): RegisteredModel | undefined {
+  return id ? MODEL_REGISTRY.get(id) : undefined;
+}
+
+function isImageModel(id: string | undefined): boolean {
+  return !!id && IMAGE_MODEL_IDS.has(id);
+}
+
+function isChatModel(id: string | undefined): boolean {
+  return !!id && CHAT_MODEL_IDS.has(id);
 }
 
 // Normalize sub-node endpoint URL — ensures it ends with /api.
@@ -356,6 +434,7 @@ interface ModelStat {
   calls: number;
   promptTokens: number;
   completionTokens: number;
+  capability?: ModelCapability;
 }
 
 const EMPTY_STAT = (): BackendStat => ({
@@ -427,6 +506,7 @@ export const statsReady: Promise<void> = (async () => {
               calls:            Number(raw.calls)            || 0,
               promptTokens:     Number(raw.promptTokens)     || 0,
               completionTokens: Number(raw.completionTokens) || 0,
+              capability: raw.capability === "image" ? "image" : "chat",
             });
           }
         }
@@ -458,13 +538,29 @@ function recordCallStat(label: string, durationMs: number, prompt: number, compl
     ms.calls++;
     ms.promptTokens += prompt;
     ms.completionTokens += completion;
+    ms.capability = MODEL_REGISTRY.get(model)?.capability ?? "chat";
   }
   scheduleSave();
 }
 
 function getModelStat(model: string): ModelStat {
-  if (!modelStatsMap.has(model)) modelStatsMap.set(model, EMPTY_MODEL_STAT());
+  if (!modelStatsMap.has(model)) {
+    modelStatsMap.set(model, {
+      ...EMPTY_MODEL_STAT(),
+      capability: MODEL_REGISTRY.get(model)?.capability ?? "chat",
+    });
+  }
   return modelStatsMap.get(model)!;
+}
+
+function recordImageCallStat(label: string, durationMs: number, model: string): void {
+  const s = getStat(label);
+  s.calls++;
+  s.totalDurationMs += durationMs;
+  const ms = getModelStat(model);
+  ms.calls++;
+  ms.capability = "image";
+  scheduleSave();
 }
 
 function recordErrorStat(label: string): void { getStat(label).errors++; scheduleSave(); }
@@ -678,8 +774,10 @@ function sendModelCatalog(_req: Request, res: Response) {
       id: m.id,
       object: "model",
       created: 1700000000,
-      owned_by: MODEL_PROVIDER_MAP.get(m.id) ?? "service-layer",
+      owned_by: MODEL_REGISTRY.get(m.id)?.provider ?? "service-layer",
       description: m.description,
+      capability: MODEL_REGISTRY.get(m.id)?.capability ?? "chat",
+      group: MODEL_REGISTRY.get(m.id)?.group ?? "openrouter",
     })),
     _meta: {
       active_backends: pool.length,
@@ -720,6 +818,27 @@ type OAIMessage =
   | { role: "tool"; content: string; tool_call_id: string }
   | { role: string; content: string | OAIContentPart[] | null };
 
+type OAIImageGenerationRequest = {
+  model?: string;
+  prompt?: string;
+  image?: string;
+  images?: string[];
+  n?: number;
+  size?: string;
+  response_format?: "b64_json" | "url" | string;
+};
+
+type GeminiNativeImageRequest = {
+  prompt?: string;
+  image?: string;
+  images?: string[];
+  n?: number;
+  size?: string;
+  response_format?: "b64_json" | "url" | string;
+  contents?: unknown;
+  config?: Record<string, unknown>;
+};
+
 type AnthropicImageSource =
   | { type: "base64"; media_type: string; data: string }
   | { type: "url"; url: string };
@@ -752,6 +871,84 @@ function convertContentForClaude(content: string | OAIContentPart[] | null | und
     }
     return { type: "text", text: JSON.stringify(part) };
   });
+}
+
+function detectMimeTypeFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/png";
+}
+
+function parseDataUrl(url: string): { mimeType: string; data: string } | null {
+  const match = url.match(/^data:([^;,]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2] };
+}
+
+function mapOpenAIImageSize(size?: string): { aspectRatio?: string } {
+  switch (size) {
+    case undefined:
+    case "":
+    case "1024x1024":
+      return { aspectRatio: "1:1" };
+    case "1536x1024":
+      return { aspectRatio: "3:2" };
+    case "1024x1536":
+      return { aspectRatio: "2:3" };
+    case "1536x864":
+      return { aspectRatio: "16:9" };
+    case "864x1536":
+      return { aspectRatio: "9:16" };
+    default:
+      throw new HttpStatusError(
+        400,
+        `Unsupported image size '${size}'. Supported sizes: 1024x1024, 1536x1024, 1024x1536, 1536x864, 864x1536.`,
+      );
+  }
+}
+
+async function imageInputToPart(value: string): Promise<Record<string, unknown>> {
+  const dataUrl = parseDataUrl(value);
+  if (dataUrl) {
+    return { inlineData: { mimeType: dataUrl.mimeType, data: dataUrl.data } };
+  }
+
+  const response = await fetch(value, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) {
+    throw new HttpStatusError(400, `Failed to fetch input image: HTTP ${response.status}`);
+  }
+  const mimeType = response.headers.get("content-type")?.split(";")[0] || detectMimeTypeFromUrl(value);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return { inlineData: { mimeType, data: buffer.toString("base64") } };
+}
+
+async function buildGeminiImageContents(prompt: string, imageInputs: string[]): Promise<Record<string, unknown>[]> {
+  const parts: Record<string, unknown>[] = [];
+  for (const input of imageInputs) {
+    parts.push(await imageInputToPart(input));
+  }
+  parts.push({ text: prompt });
+  return parts;
+}
+
+function extractGeneratedImages(response: {
+  candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }>;
+}): Array<{ mimeType: string; b64_json: string }> {
+  const parts = response.candidates?.[0]?.content?.parts ?? [];
+  const images: Array<{ mimeType: string; b64_json: string }> = [];
+  for (const part of parts) {
+    const inlineData = part.inlineData as { mimeType?: string; data?: string } | undefined;
+    if (inlineData?.data) {
+      images.push({
+        mimeType: inlineData.mimeType ?? "image/png",
+        b64_json: inlineData.data,
+      });
+    }
+  }
+  return images;
 }
 
 // Convert OpenAI tools array → Anthropic tools array
@@ -815,6 +1012,286 @@ function convertMessagesForClaude(messages: OAIMessage[]): AnthropicMessage[] {
   return result;
 }
 
+async function handleGeminiImage({
+  model,
+  prompt,
+  imageInputs,
+  n,
+  size,
+  nativeConfig,
+  nativeContents,
+}: {
+  model: string;
+  prompt: string;
+  imageInputs: string[];
+  n?: number;
+  size?: string;
+  nativeConfig?: Record<string, unknown>;
+  nativeContents?: unknown;
+}): Promise<{
+  raw: Record<string, unknown>;
+  images: Array<{ mimeType: string; b64_json: string }>;
+}> {
+  const client = makeLocalGemini();
+  const contents = nativeContents ?? await buildGeminiImageContents(prompt, imageInputs);
+  const sizeConfig = mapOpenAIImageSize(size);
+  const response = await client.models.generateContent({
+    model,
+    contents,
+    config: {
+      ...(nativeConfig ?? {}),
+      ...(sizeConfig.aspectRatio ? { aspectRatio: sizeConfig.aspectRatio } : {}),
+      ...(typeof n === "number" ? { numberOfImages: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
+    },
+  });
+  const raw = response as unknown as Record<string, unknown>;
+  const images = extractGeneratedImages(raw as {
+    candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }>;
+  });
+  if (images.length === 0) {
+    throw new HttpStatusError(502, `Image model '${model}' returned no image output.`);
+  }
+  return { raw, images };
+}
+
+async function handleFriendJsonProxy({
+  backend,
+  path,
+  body,
+  timeoutMs = 180_000,
+}: {
+  backend: Extract<Backend, { kind: "friend" }>;
+  path: string;
+  body: unknown;
+  timeoutMs?: number;
+}): Promise<Record<string, unknown>> {
+  const fetchRes = await fetch(`${backend.url}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!fetchRes.ok) {
+    const errText = await fetchRes.text().catch(() => "unknown");
+    throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
+  }
+  return await fetchRes.json() as Record<string, unknown>;
+}
+
+async function handleOpenAIImageGeneration(req: Request, res: Response) {
+  const body = req.body as OAIImageGenerationRequest;
+  const selectedModel = body.model && MODEL_REGISTRY.has(body.model) ? body.model : "gemini-2.5-flash-image";
+  const modelInfo = getRegisteredModel(selectedModel);
+  if (!modelInfo || modelInfo.capability !== "image") {
+    throw new HttpStatusError(400, `Model '${selectedModel}' is not an image generation model.`);
+  }
+  if (!isModelEnabled(selectedModel)) {
+    throw new HttpStatusError(403, `Model '${selectedModel}' is disabled on this service.`);
+  }
+  if (body.response_format && body.response_format !== "b64_json") {
+    throw new HttpStatusError(400, "This service only supports response_format 'b64_json' for image generation.");
+  }
+  const prompt = body.prompt?.trim();
+  if (!prompt) {
+    throw new HttpStatusError(400, "prompt is required.");
+  }
+  const imageInputs = [
+    ...(typeof body.image === "string" ? [body.image] : []),
+    ...(Array.isArray(body.images) ? body.images.filter((item): item is string => typeof item === "string" && item.length > 0) : []),
+  ];
+
+  const startTime = Date.now();
+  let backend = pickBackend();
+  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
+
+  const triedFriendUrls = new Set<string>();
+  for (let attempt = 0; ; attempt++) {
+    const backendLabel = backend.kind === "local" ? "local" : backend.label;
+    try {
+      let responseJson: Record<string, unknown>;
+      if (backend.kind === "friend") {
+        triedFriendUrls.add(backend.url);
+        responseJson = await handleFriendJsonProxy({
+          backend,
+          path: "/v1/images/generations",
+          body: {
+            model: selectedModel,
+            prompt,
+            image: body.image,
+            images: body.images,
+            n: body.n,
+            size: body.size,
+            response_format: "b64_json",
+          },
+        });
+      } else {
+        const result = await handleGeminiImage({
+          model: selectedModel,
+          prompt,
+          imageInputs,
+          n: body.n,
+          size: body.size,
+        });
+        responseJson = {
+          created: Math.floor(Date.now() / 1000),
+          data: result.images.map((image) => ({ b64_json: image.b64_json, mime_type: image.mimeType })),
+        };
+      }
+
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") setHealth(backend.url, true);
+      recordImageCallStat(backendLabel, duration, selectedModel);
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "image",
+        backend: backendLabel,
+        status: 200,
+        duration,
+        stream: false,
+        level: "info",
+      });
+      res.json(responseJson);
+      return;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") {
+        setHealth(backend.url, false);
+        const status = err instanceof FriendProxyHttpError ? err.status : 502;
+        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
+          backend = pickBackendExcluding(triedFriendUrls);
+          if (backend && attempt < 3) continue;
+        }
+      }
+      const status = err instanceof HttpStatusError
+        ? err.status
+        : err instanceof FriendProxyHttpError
+          ? err.status
+          : 500;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "image",
+        backend: backend.kind === "local" ? "local" : backend.label,
+        status,
+        duration,
+        stream: false,
+        level: status >= 500 ? "error" : "warn",
+        error: message,
+      });
+      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
+      throw err;
+    }
+  }
+}
+
+async function handleGeminiNativeImage(req: Request, res: Response) {
+  const params = req.body as GeminiNativeImageRequest;
+  const selectedModel = req.params.model;
+  const modelInfo = getRegisteredModel(selectedModel);
+  if (!modelInfo || modelInfo.capability !== "image") {
+    throw new HttpStatusError(400, `Model '${selectedModel}' is not an image generation model.`);
+  }
+  if (!isModelEnabled(selectedModel)) {
+    throw new HttpStatusError(403, `Model '${selectedModel}' is disabled on this service.`);
+  }
+  if (params.response_format && params.response_format !== "b64_json") {
+    throw new HttpStatusError(400, "This service only supports base64 image output.");
+  }
+  const prompt = params.prompt?.trim() || "Generate an image.";
+  const imageInputs = [
+    ...(typeof params.image === "string" ? [params.image] : []),
+    ...(Array.isArray(params.images) ? params.images.filter((item): item is string => typeof item === "string" && item.length > 0) : []),
+  ];
+  const startTime = Date.now();
+  let backend = pickBackend();
+  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
+  const triedFriendUrls = new Set<string>();
+
+  for (let attempt = 0; ; attempt++) {
+    const backendLabel = backend.kind === "local" ? "local" : backend.label;
+    try {
+      let responseJson: Record<string, unknown>;
+      if (backend.kind === "friend") {
+        triedFriendUrls.add(backend.url);
+        responseJson = await handleFriendJsonProxy({
+          backend,
+          path: `/v1beta/models/${selectedModel}:generateImages`,
+          body: params,
+        });
+      } else {
+        const result = await handleGeminiImage({
+          model: selectedModel,
+          prompt,
+          imageInputs,
+          n: params.n,
+          size: params.size,
+          nativeConfig: params.config,
+          nativeContents: params.contents,
+        });
+        responseJson = {
+          model: selectedModel,
+          generatedImages: result.images.map((image) => ({
+            image: {
+              mimeType: image.mimeType,
+              imageBytes: image.b64_json,
+            },
+          })),
+        };
+      }
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") setHealth(backend.url, true);
+      recordImageCallStat(backendLabel, duration, selectedModel);
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "image",
+        backend: backendLabel,
+        status: 200,
+        duration,
+        stream: false,
+        level: "info",
+      });
+      res.json(responseJson);
+      return;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") {
+        setHealth(backend.url, false);
+        const status = err instanceof FriendProxyHttpError ? err.status : 502;
+        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
+          backend = pickBackendExcluding(triedFriendUrls);
+          if (backend && attempt < 3) continue;
+        }
+      }
+      const status = err instanceof HttpStatusError
+        ? err.status
+        : err instanceof FriendProxyHttpError
+          ? err.status
+          : 500;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "image",
+        backend: backend.kind === "local" ? "local" : backend.label,
+        status,
+        duration,
+        stream: false,
+        level: status >= 500 ? "error" : "warn",
+        error: message,
+      });
+      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
+      throw err;
+    }
+  }
+}
+
 async function handleChatCompletions(req: Request, res: Response) {
   const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
     model?: string;
@@ -830,9 +1307,19 @@ async function handleChatCompletions(req: Request, res: Response) {
     res.status(403).json({ error: { message: `Model '${model}' is disabled on this service`, type: "invalid_request_error", code: "model_disabled" } });
     return;
   }
+  if (model && isImageModel(model)) {
+    res.status(400).json({
+      error: {
+        message: `Model '${model}' is image-only. Use /v1/images/generations or /v1beta/models/${model}:generateImages instead.`,
+        type: "invalid_request_error",
+        code: "wrong_model_capability",
+      },
+    });
+    return;
+  }
 
-  const selectedModel = model && ALL_MODELS.some((m) => m.id === model) ? model : "gpt-5.2";
-  const provider = MODEL_PROVIDER_MAP.get(selectedModel) ?? "openai";
+  const selectedModel = model && isChatModel(model) ? model : "gpt-5.2";
+  const provider = MODEL_REGISTRY.get(selectedModel)?.provider ?? "openai";
   const isClaudeModel = provider === "anthropic";
   const isGeminiModel = provider === "gemini";
   const isOpenRouterModel = provider === "openrouter";
@@ -956,6 +1443,31 @@ for (const path of ["/v1/chat/completions", "/service/chat"]) {
   router.post(path, requireApiKey, handleChatCompletions);
 }
 
+router.post("/v1/images/generations", requireApiKey, async (req, res) => {
+  try {
+    await handleOpenAIImageGeneration(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post("/v1beta/models/:model/generateImages", requireApiKey, async (req, res) => {
+  try {
+    await handleGeminiNativeImage(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post(/^\/v1beta\/models\/([^:]+):generateImages$/, requireApiKey, async (req, res) => {
+  try {
+    req.params.model = req.params[0];
+    await handleGeminiNativeImage(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Anthropic-native /v1/messages endpoint
 // Accepts Anthropic API format directly (for clients like Cherry Studio, Claude.ai compatible tools)
@@ -1073,6 +1585,7 @@ interface RequestLog {
   method: string;
   path: string;
   model?: string;
+  capability?: ModelCapability;
   backend?: string;
   status: number;
   duration: number;
@@ -1278,14 +1791,17 @@ for (const path of ["/v1/admin/routing", "/service/routing"]) {
 function listModels(_req: Request, res: Response) {
   const models = ALL_MODELS.map((m) => ({
     id: m.id,
-    provider: MODEL_PROVIDER_MAP.get(m.id) ?? "openrouter",
+    provider: MODEL_REGISTRY.get(m.id)?.provider ?? "openrouter",
+    capability: MODEL_REGISTRY.get(m.id)?.capability ?? "chat",
+    group: MODEL_REGISTRY.get(m.id)?.group ?? "openrouter",
+    testMode: MODEL_REGISTRY.get(m.id)?.testMode ?? "chat",
     enabled: isModelEnabled(m.id),
   }));
   const summary: Record<string, { total: number; enabled: number }> = {};
   for (const m of models) {
-    if (!summary[m.provider]) summary[m.provider] = { total: 0, enabled: 0 };
-    summary[m.provider].total++;
-    if (m.enabled) summary[m.provider].enabled++;
+    if (!summary[m.group]) summary[m.group] = { total: 0, enabled: 0 };
+    summary[m.group].total++;
+    if (m.enabled) summary[m.group].enabled++;
   }
   res.json({ models, summary });
 }
@@ -1293,16 +1809,18 @@ function listModels(_req: Request, res: Response) {
 // PATCH /v1/admin/models — bulk enable/disable by ids or by provider
 // Body: { ids?: string[], provider?: string, enabled: boolean }
 function updateModels(req: Request, res: Response) {
-  const { ids, provider, enabled } = req.body as { ids?: string[]; provider?: string; enabled?: boolean };
+  const { ids, group, provider, enabled } = req.body as { ids?: string[]; group?: string; provider?: string; enabled?: boolean };
   if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) required" }); return; }
 
   let targets: string[] = [];
   if (Array.isArray(ids) && ids.length > 0) {
-    targets = ids.filter((id) => MODEL_PROVIDER_MAP.has(id));
+    targets = ids.filter((id) => MODEL_REGISTRY.has(id));
+  } else if (typeof group === "string") {
+    targets = REGISTERED_MODELS.filter((model) => model.group === group).map((model) => model.id);
   } else if (typeof provider === "string") {
-    targets = ALL_MODELS.map((m) => m.id).filter((id) => MODEL_PROVIDER_MAP.get(id) === provider);
+    targets = REGISTERED_MODELS.filter((model) => model.provider === provider).map((model) => model.id);
   } else {
-    res.status(400).json({ error: "ids (string[]) or provider (string) required" }); return;
+    res.status(400).json({ error: "ids (string[]), group (string), or provider (string) required" }); return;
   }
 
   for (const id of targets) {
@@ -1335,6 +1853,35 @@ class FriendProxyHttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
     this.name = "FriendProxyHttpError";
+  }
+}
+
+function sendApiError(_req: Request, res: Response, err: unknown): void {
+  const status = err instanceof HttpStatusError
+    ? err.status
+    : err instanceof FriendProxyHttpError
+      ? err.status
+      : 500;
+  const message = err instanceof Error ? err.message : "Unknown error";
+  const alreadyLogged = !!(err as { __logged?: boolean } | null | undefined)?.__logged;
+  if (!alreadyLogged) {
+    pushRequestLog({
+      method: _req.method,
+      path: _req.path,
+      status,
+      duration: 0,
+      stream: false,
+      level: status >= 500 ? "error" : "warn",
+      error: message,
+    });
+  }
+  if (!res.headersSent) {
+    res.status(status).json({
+      error: {
+        message,
+        type: status >= 500 ? "server_error" : "invalid_request_error",
+      },
+    });
   }
 }
 

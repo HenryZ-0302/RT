@@ -17,16 +17,17 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
-interface ModelStatus { id: string; provider: string; enabled: boolean }
+interface ModelStatus { id: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
 type Provider = "openai" | "anthropic" | "gemini" | "openrouter";
+type GroupKey = "openai" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
 
 interface ModelEntry {
   id: string;
   label: string;
   provider: Provider;
   desc: string;
-  badge?: "thinking" | "tools" | "reasoning";
+  badge?: "thinking" | "tools" | "reasoning" | "image";
   context?: string;
 }
 
@@ -84,6 +85,11 @@ export const GEMINI_MODELS: ModelEntry[] = [
   { id: "gemini-2.5-flash-thinking", label: "Gemini 2.5 Flash (thinking)", provider: "gemini", desc: "扩展思考（隐藏）", context: "1M", badge: "thinking" },
 ];
 
+export const GEMINI_IMAGE_MODELS: ModelEntry[] = [
+  { id: "gemini-3-pro-image-preview", label: "Gemini 3 Pro Image Preview", provider: "gemini", desc: "图片生成与编辑模型", context: "Image", badge: "image" },
+  { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "gemini", desc: "快速图片生成与编辑模型", context: "Image", badge: "image" },
+];
+
 export const OPENROUTER_MODELS: ModelEntry[] = [
   { id: "x-ai/grok-4.20", label: "Grok 4.20", provider: "openrouter", desc: "xAI 最新旗舰推理模型", badge: "tools" },
   { id: "x-ai/grok-4.1-fast", label: "Grok 4.1 Fast", provider: "openrouter", desc: "xAI 高速对话模型", badge: "tools" },
@@ -109,13 +115,22 @@ const PROVIDER_COLORS: Record<Provider, { border: string; bg: string; dot: strin
   openrouter: { bg: "bg-purple-500/10", border: "border-purple-500/20", dot: "bg-purple-400", text: "text-purple-500" },
 };
 
+const GROUP_META: Record<GroupKey, { title: string; provider: Provider; models: ModelEntry[] }> = {
+  openai: { title: "OpenAI", provider: "openai", models: OPENAI_MODELS },
+  anthropic: { title: "Anthropic Claude", provider: "anthropic", models: ANTHROPIC_MODELS },
+  gemini: { title: "Google Gemini", provider: "gemini", models: GEMINI_MODELS },
+  gemini_image: { title: "Google Gemini Images", provider: "gemini", models: GEMINI_IMAGE_MODELS },
+  openrouter: { title: "OpenRouter", provider: "openrouter", models: OPENROUTER_MODELS },
+};
+
 function Badge({ variant }: { variant: string }) {
   const styles: Record<string, string> = {
     thinking: "text-purple-500 bg-purple-500/10 border-purple-500/20",
     tools: "text-amber-500 bg-amber-500/10 border-amber-500/20",
     reasoning: "text-rose-500 bg-rose-500/10 border-rose-500/20",
+    image: "text-cyan-500 bg-cyan-500/10 border-cyan-500/20",
   };
-  const labels: Record<string, string> = { thinking: "思考", tools: "工具", reasoning: "推理" };
+  const labels: Record<string, string> = { thinking: "思考", tools: "工具", reasoning: "推理", image: "图片" };
   const s = styles[variant] ?? styles.tools;
   return (
     <span className={cn("text-[10px] font-semibold border rounded px-1.5 py-0.5 flex-shrink-0 inline-flex items-center w-max tracking-wide", s)}>
@@ -158,11 +173,11 @@ export function ModelsPage({
   modelStatus: ModelStatus[];
   summary: Record<string, GroupSummary>;
   onRefresh: () => void;
-  onToggleProvider: (provider: string, enabled: boolean) => void;
+  onToggleProvider: (group: string, enabled: boolean) => void;
   onToggleModel: (id: string, enabled: boolean) => void;
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    openai: false, anthropic: false, gemini: false, openrouter: false,
+    openai: false, anthropic: false, gemini: false, gemini_image: false, openrouter: false,
   });
   const [filter, setFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -175,30 +190,46 @@ export function ModelsPage({
     return () => window.clearTimeout(timer);
   }, [checkNotice]);
 
+  const modelMetaMap = new Map(modelStatus.map((m) => [m.id, m]));
+
   const testModel = async (modelId: string) => {
     if (checkingId) return;
     setCheckingId(modelId);
     setCheckNotice(null);
     const start = Date.now();
     try {
-      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: "user", content: "Reply with exactly: OK" }],
-          max_tokens: 16
-        })
-      });
+      const testMode = modelMetaMap.get(modelId)?.testMode ?? "chat";
+      const res = await fetch(
+        testMode === "image" ? `${baseUrl}/v1/images/generations` : `${baseUrl}/v1/chat/completions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(
+            testMode === "image"
+              ? {
+                  model: modelId,
+                  prompt: "Generate a simple blue square icon",
+                  response_format: "b64_json"
+                }
+              : {
+                  model: modelId,
+                  messages: [{ role: "user", content: "Reply with exactly: OK" }],
+                  max_tokens: 16
+                }
+          )
+        }
+      );
       const latency = Date.now() - start;
       if (res.ok) {
         setCheckNotice({
           kind: "success",
           modelId,
-          message: `模型 ${modelId} 检测成功，响应耗时 ${latency}ms。`,
+          message: testMode === "image"
+            ? `模型 ${modelId} 图片生成检测成功，响应耗时 ${latency}ms。`
+            : `模型 ${modelId} 检测成功，响应耗时 ${latency}ms。`,
         });
       } else {
         const err = await res.json().catch(() => ({ error: { message: "Unknown error" } }));
@@ -219,12 +250,8 @@ export function ModelsPage({
     }
   };
 
-  const allGroups = [
-    { key: "openai", title: "OpenAI", models: OPENAI_MODELS, provider: "openai" as Provider },
-    { key: "anthropic", title: "Anthropic Claude", models: ANTHROPIC_MODELS, provider: "anthropic" as Provider },
-    { key: "gemini", title: "Google Gemini", models: GEMINI_MODELS, provider: "gemini" as Provider },
-    { key: "openrouter", title: "OpenRouter", models: OPENROUTER_MODELS, provider: "openrouter" as Provider },
-  ];
+  const allGroups = (Object.entries(GROUP_META) as Array<[GroupKey, { title: string; provider: Provider; models: ModelEntry[] }]>)
+    .map(([key, value]) => ({ key, ...value }));
 
   const statusMap = new Map(modelStatus.map((m) => [m.id, m.enabled]));
   const totalEnabled = modelStatus.filter((m) => m.enabled).length;

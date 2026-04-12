@@ -15,7 +15,7 @@ import {
 import { cn } from "../lib/utils";
 
 type BackendStat = { calls: number; errors: number; streamingCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; avgDurationMs: number; avgTtftMs: number | null; health: string; url?: string; dynamic?: boolean; enabled?: boolean };
-type ModelStat = { calls: number; promptTokens: number; completionTokens: number };
+type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
 
 const DEFAULT_PRICING = { input: 3, output: 15 };
 
@@ -171,16 +171,24 @@ export function StatsPage({
 
   const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString();
 
+  const chatModelEntries = modelStats
+    ? Object.entries(modelStats).filter(([, ms]) => (ms.capability ?? "chat") !== "image")
+    : [];
+
+  const imageModelEntries = modelStats
+    ? Object.entries(modelStats).filter(([, ms]) => ms.capability === "image")
+    : [];
+
   const totalModelCost = modelStats
-    ? Object.entries(modelStats).reduce((sum, [model, ms]) => sum + estimateModelCost(model, ms.promptTokens, ms.completionTokens), 0)
+    ? chatModelEntries.reduce((sum, [model, ms]) => sum + estimateModelCost(model, ms.promptTokens, ms.completionTokens), 0)
     : null;
 
   const totalModelInputCost = modelStats
-    ? Object.entries(modelStats).reduce((sum, [model, ms]) => sum + (ms.promptTokens * getModelPrice(model).input) / 1_000_000, 0)
+    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (ms.promptTokens * getModelPrice(model).input) / 1_000_000, 0)
     : null;
 
   const totalModelOutputCost = modelStats
-    ? Object.entries(modelStats).reduce((sum, [model, ms]) => sum + (ms.completionTokens * getModelPrice(model).output) / 1_000_000, 0)
+    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (ms.completionTokens * getModelPrice(model).output) / 1_000_000, 0)
     : null;
 
   const estimateCostFallback = (prompt: number, completion: number) => {
@@ -340,6 +348,7 @@ export function StatsPage({
                 <div className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded-md border border-border/50">
                   <div className="flex justify-between mb-1"><span>输入开销:</span> <span>${(totalModelInputCost !== null ? totalModelInputCost : ((totals!.promptTokens * DEFAULT_PRICING.input / 1_000_000))).toFixed(2)}</span></div>
                   <div className="flex justify-between"><span>输出开销:</span> <span>${(totalModelOutputCost !== null ? totalModelOutputCost : ((totals!.completionTokens * DEFAULT_PRICING.output / 1_000_000))).toFixed(2)}</span></div>
+                  <div className="flex justify-between mt-1"><span>图片请求:</span> <span>{imageModelEntries.reduce((sum, [, ms]) => sum + ms.calls, 0)}</span></div>
                 </div>
               </div>
             </Card>
@@ -353,7 +362,7 @@ export function StatsPage({
                 if (!modelStats || Object.keys(modelStats).length === 0) {
                   return <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>;
                 }
-                const sorted = Object.entries(modelStats)
+                const sorted = chatModelEntries
                   .filter(([, ms]) => ms.calls > 0)
                   .map(([model, ms]) => ({ model, cost: estimateModelCost(model, ms.promptTokens, ms.completionTokens), calls: ms.calls }))
                   .sort((a, b) => b.cost - a.cost);
