@@ -72,6 +72,8 @@ export const ANTHROPIC_MODELS: ModelEntry[] = [
 ];
 
 export const GEMINI_MODELS: ModelEntry[] = [
+  { id: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview", provider: "gemini", desc: "旗舰多模态预览模型", context: "2M", badge: "tools" },
+  { id: "gemini-3-pro-preview-thinking", label: "Gemini 3 Pro Preview (thinking)", provider: "gemini", desc: "扩展思考（隐藏）", context: "2M", badge: "thinking" },
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview", provider: "gemini", desc: "最新旗舰多模态模型", context: "2M", badge: "tools" },
   { id: "gemini-3.1-pro-preview-thinking", label: "Gemini 3.1 Pro Preview (thinking)", provider: "gemini", desc: "扩展思考（隐藏）", context: "2M", badge: "thinking" },
   { id: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview", provider: "gemini", desc: "极速多模态模型", context: "1M", badge: "tools" },
