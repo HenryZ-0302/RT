@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   Server, 
   Search, 
@@ -178,6 +178,12 @@ export function ModelsPage({
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [checkNotice, setCheckNotice] = useState<CheckNotice | null>(null);
 
+  useEffect(() => {
+    if (!checkNotice) return;
+    const timer = window.setTimeout(() => setCheckNotice(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [checkNotice]);
+
   const testModel = async (modelId: string) => {
     if (checkingId) return;
     setCheckingId(modelId);
@@ -192,8 +198,8 @@ export function ModelsPage({
         },
         body: JSON.stringify({
           model: modelId,
-          messages: [{ role: "user", content: "hi" }],
-          max_tokens: 1
+          messages: [{ role: "user", content: "Reply with exactly: OK" }],
+          max_tokens: 16
         })
       });
       const latency = Date.now() - start;
@@ -250,10 +256,10 @@ export function ModelsPage({
       {checkNotice && (
         <div
           className={cn(
-            "flex items-start gap-3 rounded-xl border px-4 py-3 shadow-sm animate-in fade-in slide-in-from-top-2",
+            "fixed top-4 right-4 z-50 w-[min(420px,calc(100vw-2rem))] flex items-start gap-3 rounded-2xl border px-4 py-3 shadow-xl backdrop-blur-sm animate-in fade-in slide-in-from-top-2",
             checkNotice.kind === "success"
-              ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20"
-              : "bg-rose-500/10 text-rose-700 border-rose-500/20",
+              ? "bg-emerald-500/95 text-white border-emerald-400/40"
+              : "bg-rose-500/95 text-white border-rose-400/40",
           )}
         >
           <div className="mt-0.5 flex-shrink-0">
@@ -268,7 +274,7 @@ export function ModelsPage({
           <button
             type="button"
             onClick={() => setCheckNotice(null)}
-            className="text-xs font-medium opacity-70 hover:opacity-100 transition-opacity"
+            className="text-xs font-medium opacity-80 hover:opacity-100 transition-opacity"
           >
             关闭
           </button>
