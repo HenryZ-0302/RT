@@ -191,6 +191,27 @@ export function StatsPage({
     ? chatModelEntries.reduce((sum, [model, ms]) => sum + (ms.completionTokens * getModelPrice(model).output) / 1_000_000, 0)
     : null;
 
+  const sortedChatModelEntries = chatModelEntries
+    .filter(([, ms]) => ms.calls > 0)
+    .map(([model, ms]) => ({
+      model,
+      calls: ms.calls,
+      capability: "chat" as const,
+      cost: estimateModelCost(model, ms.promptTokens, ms.completionTokens),
+    }))
+    .sort((a, b) => b.cost - a.cost);
+
+  const sortedImageModelEntries = imageModelEntries
+    .filter(([, ms]) => ms.calls > 0)
+    .map(([model, ms]) => ({
+      model,
+      calls: ms.calls,
+      capability: "image" as const,
+    }))
+    .sort((a, b) => b.calls - a.calls);
+
+  const hasModelStats = sortedChatModelEntries.length > 0 || sortedImageModelEntries.length > 0;
+
   const estimateCostFallback = (prompt: number, completion: number) => {
     return (prompt * DEFAULT_PRICING.input + completion * DEFAULT_PRICING.output) / 1_000_000;
   };
@@ -358,27 +379,32 @@ export function StatsPage({
               </div>
             </Card>
 
-             {/* 按模型开销 */}
+             {/* 按模型统计 */}
              <Card className="flex flex-col border-purple-500/10 shadow-sm border-t-2 border-t-purple-500 lg:col-span-1">
               <div className="flex items-center gap-2 text-purple-500 mb-4 font-semibold text-sm">
-                <Settings2 size={16} /> 按模型开销
+                <Settings2 size={16} /> 按模型统计
               </div>
               {(() => {
                 if (!modelStats || Object.keys(modelStats).length === 0) {
                   return <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>;
                 }
-                const sorted = chatModelEntries
-                  .filter(([, ms]) => ms.calls > 0)
-                  .map(([model, ms]) => ({ model, cost: estimateModelCost(model, ms.promptTokens, ms.completionTokens), calls: ms.calls }))
-                  .sort((a, b) => b.cost - a.cost);
-                if (sorted.length === 0) return <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>;
+                if (!hasModelStats) return <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>;
                 return (
                   <div className="flex flex-col gap-2 max-h-[140px] overflow-y-auto pr-1">
-                    {sorted.map(({ model, cost, calls }) => (
+                    {sortedChatModelEntries.map(({ model, cost, calls }) => (
                       <div key={model} className="flex justify-between items-center text-[11px] gap-3">
                         <span className="text-muted-foreground font-mono truncate flex-1" title={model}>{model}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">文本</span>
                         <span className="text-foreground shrink-0">{calls}次</span>
                         <span className="text-amber-500 font-semibold shrink-0">${cost.toFixed(4)}</span>
+                      </div>
+                    ))}
+                    {sortedImageModelEntries.map(({ model, calls }) => (
+                      <div key={model} className="flex justify-between items-center text-[11px] gap-3">
+                        <span className="text-muted-foreground font-mono truncate flex-1" title={model}>{model}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 shrink-0">图片</span>
+                        <span className="text-foreground shrink-0">{calls}次</span>
+                        <span className="text-muted-foreground shrink-0">不计 token 开销</span>
                       </div>
                     ))}
                   </div>
