@@ -894,8 +894,11 @@ async function handleChatCompletions(req: Request, res: Response) {
         const client = makeLocalOpenRouter();
         result = await handleOpenAI({ req, res, client, model: selectedModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
       } else {
+        const actualModel = selectedModel.endsWith("-thinking")
+          ? selectedModel.replace(/-thinking$/, "")
+          : selectedModel;
         const client = makeLocalOpenAI();
-        result = await handleOpenAI({ req, res, client, model: selectedModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
+        result = await handleOpenAI({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
       }
       // ✅ Success — record stats, mark friend healthy, and exit retry loop
       if (backend.kind === "friend") setHealth(backend.url, true);

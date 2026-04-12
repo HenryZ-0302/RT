@@ -30,6 +30,12 @@ interface ModelEntry {
   context?: string;
 }
 
+type CheckNotice = {
+  kind: "success" | "error";
+  modelId: string;
+  message: string;
+};
+
 // Model Arrays (Copied from App.tsx context)
 export const OPENAI_MODELS: ModelEntry[] = [
   { id: "gpt-5.2", label: "GPT-5.2", provider: "openai", desc: "最新旗舰多模态模型", context: "128K", badge: "tools" },
@@ -170,11 +176,12 @@ export function ModelsPage({
   const [filter, setFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [checkingId, setCheckingId] = useState<string | null>(null);
-  const [checkResults, setCheckResults] = useState<Record<string, { ok: boolean; error?: string; latency?: number }>>({});
+  const [checkNotice, setCheckNotice] = useState<CheckNotice | null>(null);
 
   const testModel = async (modelId: string) => {
     if (checkingId) return;
     setCheckingId(modelId);
+    setCheckNotice(null);
     const start = Date.now();
     try {
       const res = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -191,13 +198,25 @@ export function ModelsPage({
       });
       const latency = Date.now() - start;
       if (res.ok) {
-        setCheckResults(prev => ({ ...prev, [modelId]: { ok: true, latency } }));
+        setCheckNotice({
+          kind: "success",
+          modelId,
+          message: `模型 ${modelId} 检测成功，响应耗时 ${latency}ms。`,
+        });
       } else {
         const err = await res.json().catch(() => ({ error: { message: "Unknown error" } }));
-        setCheckResults(prev => ({ ...prev, [modelId]: { ok: false, error: err.error?.message || `HTTP ${res.status}` } }));
+        setCheckNotice({
+          kind: "error",
+          modelId,
+          message: `模型 ${modelId} 检测失败：${err.error?.message || `HTTP ${res.status}`}`,
+        });
       }
     } catch (e) {
-      setCheckResults(prev => ({ ...prev, [modelId]: { ok: false, error: (e as Error).message } }));
+      setCheckNotice({
+        kind: "error",
+        modelId,
+        message: `模型 ${modelId} 检测失败：${(e as Error).message}`,
+      });
     } finally {
       setCheckingId(null);
     }
@@ -228,6 +247,34 @@ export function ModelsPage({
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {checkNotice && (
+        <div
+          className={cn(
+            "flex items-start gap-3 rounded-xl border px-4 py-3 shadow-sm animate-in fade-in slide-in-from-top-2",
+            checkNotice.kind === "success"
+              ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20"
+              : "bg-rose-500/10 text-rose-700 border-rose-500/20",
+          )}
+        >
+          <div className="mt-0.5 flex-shrink-0">
+            {checkNotice.kind === "success" ? <Check size={16} /> : <AlertCircle size={16} />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">
+              {checkNotice.kind === "success" ? "模型检测成功" : "模型检测失败"}
+            </div>
+            <div className="text-sm opacity-90 break-words">{checkNotice.message}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCheckNotice(null)}
+            className="text-xs font-medium opacity-70 hover:opacity-100 transition-opacity"
+          >
+            关闭
+          </button>
+        </div>
+      )}
+
       {/* Top Controls Bar */}
       <Card className="flex flex-col md:flex-row md:items-center gap-4 bg-secondary/20 shadow-none border-border/60">
         <div className="flex-1">
@@ -374,22 +421,6 @@ export function ModelsPage({
                             </div>
                           </div>
                           <div className="ml-auto pl-4 flex items-center gap-3">
-                            {/* Healthcheck Result */}
-                            {checkResults[m.id] && (
-                              <div className={cn(
-                                "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold animate-in fade-in slide-in-from-right-2",
-                                checkResults[m.id].ok 
-                                  ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" 
-                                  : "bg-rose-500/10 text-rose-500 border border-rose-500/20"
-                              )} title={checkResults[m.id].error}>
-                                {checkResults[m.id].ok ? (
-                                  <><span>OK</span><span className="opacity-50 font-normal">{checkResults[m.id].latency}ms</span></>
-                                ) : (
-                                  <><AlertCircle size={10} /><span>FAIL</span></>
-                                )}
-                              </div>
-                            )}
-
                             <button
                               onClick={(e) => { e.stopPropagation(); testModel(m.id); }}
                               disabled={!enabled || checkingId === m.id}
