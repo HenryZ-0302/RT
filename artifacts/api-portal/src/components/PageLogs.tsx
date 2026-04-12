@@ -283,12 +283,12 @@ export default function PageLogs({ baseUrl, apiKey }: { baseUrl: string; apiKey:
                    <Activity size={24} className="animate-pulse opacity-50" />
                    <span>等待接入新的日志事件...</span>
                  </>
-               ) : connError ? (
-                 <>
-                   <AlertCircle size={24} className="text-red-500 opacity-50" />
-                   <span className="text-red-400/80">请求被拒绝。请检查您的 API Key 凭据</span>
-                 </>
-               ) : (
+                ) : connError ? (
+                  <>
+                    <AlertCircle size={24} className="text-red-500 opacity-50" />
+                    <span className="text-red-400/80">日志连接失败。请查看上方错误详情后重试</span>
+                  </>
+                ) : (
                  <>
                    <div className="w-6 h-6 border-2 border-zinc-700 border-t-zinc-400 rounded-full animate-spin" />
                    <span>正在尝试建立安全连接...</span>
