@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   Copy, 
   Check, 
@@ -11,7 +11,8 @@ import {
   Info
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import versionData from "../../../../version.json";
+import { servicePaths } from "../lib/service";
+import { FALLBACK_VERSION_INFO, type PortalVersionInfo } from "../lib/version";
 
 // Helper components
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -69,6 +70,35 @@ export function HomePage({
   stLoading: boolean;
   onToggleSTMode: () => void;
 }) {
+  const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVersionInfo() {
+      try {
+        const response = await fetch(servicePaths.release(displayUrl));
+        if (!response.ok) return;
+        const data = await response.json() as PortalVersionInfo;
+        if (cancelled) return;
+        setVersionInfo({
+          version: data.version ?? FALLBACK_VERSION_INFO.version,
+          name: data.name ?? FALLBACK_VERSION_INFO.name,
+          releaseDate: data.releaseDate ?? FALLBACK_VERSION_INFO.releaseDate,
+          releaseNotes: data.releaseNotes ?? FALLBACK_VERSION_INFO.releaseNotes,
+        });
+      } catch {
+        // Keep the bundled fallback version info when the service is unavailable.
+      }
+    }
+
+    void loadVersionInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayUrl]);
+
   return (
     <div className="space-y-6 max-w-5xl">
       {/* Current release nodes */}
@@ -80,11 +110,11 @@ export function HomePage({
         
         <div className="mb-4 relative">
           <div className="flex items-center gap-3 mb-2">
-            <span className="font-mono text-sm font-bold text-primary">v{versionData.version}</span>
-            <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{versionData.releaseDate}</span>
+            <span className="font-mono text-sm font-bold text-primary">v{versionInfo.version}</span>
+            <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{versionInfo.releaseDate}</span>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed ml-1">
-            {versionData.releaseNotes}
+            {versionInfo.releaseNotes}
           </p>
         </div>
       </Card>
