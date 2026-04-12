@@ -501,6 +501,27 @@ function buildReasoningFields(reasoning: string): { reasoning: string; reasoning
   };
 }
 
+function extractGeminiTextAndReasoning(source: unknown): { text: string; reasoning: string } {
+  const candidates = (source as { candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }> })?.candidates;
+  const parts = candidates?.[0]?.content?.parts ?? [];
+  const textParts: string[] = [];
+  const reasoningParts: string[] = [];
+
+  for (const part of parts) {
+    if (typeof part?.text !== "string" || !part.text) continue;
+    if (part.thought === true) {
+      reasoningParts.push(part.text);
+    } else {
+      textParts.push(part.text);
+    }
+  }
+
+  return {
+    text: textParts.join(""),
+    reasoning: reasoningParts.join(""),
+  };
+}
+
 async function fakeStreamResponse(
   res: Response,
   json: Record<string, unknown>,
@@ -522,6 +543,9 @@ async function fakeStreamResponse(
   const ttftMs = Date.now() - startTime;
 
   const fullContent = (choices[0]?.["message"] as { content?: string })?.content ?? "";
+  const fullReasoning = (choices[0]?.["message"] as { reasoning?: string; reasoning_content?: string })?.reasoning_content
+    ?? (choices[0]?.["message"] as { reasoning?: string })?.reasoning
+    ?? "";
   const toolCalls = (choices[0]?.["message"] as { tool_calls?: unknown[] })?.tool_calls;
 
   if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
@@ -533,6 +557,18 @@ async function fakeStreamResponse(
   }
 
   const CHUNK_SIZE = 4;
+  for (let i = 0; i < fullReasoning.length; i += CHUNK_SIZE) {
+    const slice = fullReasoning.slice(i, i + CHUNK_SIZE);
+    const chunk = {
+      id, object: "chat.completion.chunk", created, model,
+      choices: [{ index: 0, delta: buildReasoningFields(slice), finish_reason: null }],
+    };
+    writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
+    if (i + CHUNK_SIZE < fullReasoning.length) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
   for (let i = 0; i < fullContent.length; i += CHUNK_SIZE) {
     const slice = fullContent.slice(i, i + CHUNK_SIZE);
     const chunk = {
@@ -645,7 +681,7 @@ function sendModelCatalog(_req: Request, res: Response) {
       id: m.id,
       object: "model",
       created: 1700000000,
-      owned_by: "service-layer",
+      owned_by: MODEL_PROVIDER_MAP.get(m.id) ?? "service-layer",
       description: m.description,
     })),
     _meta: {
@@ -1566,7 +1602,10 @@ async function handleGemini({
   const config: Record<string, unknown> = {};
   if (maxTokens) config.maxOutputTokens = maxTokens;
   if (thinking) {
-    config.thinkingConfig = { thinkingBudget: maxTokens ? Math.min(maxTokens, 32768) : 16384 };
+    config.thinkingConfig = {
+      thinkingBudget: maxTokens ? Math.min(maxTokens, 32768) : 16384,
+      includeThoughts: true,
+    };
   }
 
   if (stream) {
@@ -1587,26 +1626,42 @@ async function handleGemini({
       });
 
       for await (const chunk of response) {
-        const text = chunk.text ?? "";
-        if (ttftMs === undefined && text) {
+        const { text, reasoning } = extractGeminiTextAndReasoning(chunk);
+        if (ttftMs === undefined && (text || reasoning)) {
           ttftMs = Date.now() - startTime;
         }
         if (chunk.usageMetadata) {
           promptTokens = chunk.usageMetadata.promptTokenCount ?? 0;
           completionTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
         }
-        const oaiChunk = {
-          id: chatId,
-          object: "chat.completion.chunk",
-          created: Math.floor(Date.now() / 1000),
-          model,
-          choices: [{
-            index: 0,
-            delta: { content: text },
-            finish_reason: chunk.candidates?.[0]?.finishReason === "STOP" ? "stop" : null,
-          }],
-        };
-        writeAndFlush(res, `data: ${JSON.stringify(oaiChunk)}\n\n`);
+        if (reasoning) {
+          const reasoningChunk = {
+            id: chatId,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{
+              index: 0,
+              delta: buildReasoningFields(reasoning),
+              finish_reason: null,
+            }],
+          };
+          writeAndFlush(res, `data: ${JSON.stringify(reasoningChunk)}\n\n`);
+        }
+        if (text) {
+          const oaiChunk = {
+            id: chatId,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{
+              index: 0,
+              delta: { content: text },
+              finish_reason: chunk.candidates?.[0]?.finishReason === "STOP" ? "stop" : null,
+            }],
+          };
+          writeAndFlush(res, `data: ${JSON.stringify(oaiChunk)}\n\n`);
+        }
       }
 
       writeAndFlush(res, "data: [DONE]\n\n");
@@ -1619,13 +1674,21 @@ async function handleGemini({
         model, contents,
         config: { ...config, ...(systemInstruction ? { systemInstruction } : {}) },
       });
-      const text = response.text ?? "";
+      const { text, reasoning } = extractGeminiTextAndReasoning(response);
       const pTokens = response.usageMetadata?.promptTokenCount ?? 0;
       const cTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
       const json = {
         id: `chatcmpl-${Date.now()}`, object: "chat.completion",
         created: Math.floor(Date.now() / 1000), model,
-        choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: text || null,
+            ...(reasoning ? buildReasoningFields(reasoning) : {}),
+          },
+          finish_reason: "stop",
+        }],
         usage: { prompt_tokens: pTokens, completion_tokens: cTokens, total_tokens: pTokens + cTokens },
       };
       return fakeStreamResponse(res, json as unknown as Record<string, unknown>, startTime);
@@ -1640,7 +1703,7 @@ async function handleGemini({
       },
     });
 
-    const text = response.text ?? "";
+    const { text, reasoning } = extractGeminiTextAndReasoning(response);
     const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
     const completionTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
 
@@ -1651,7 +1714,11 @@ async function handleGemini({
       model,
       choices: [{
         index: 0,
-        message: { role: "assistant", content: text },
+        message: {
+          role: "assistant",
+          content: text || null,
+          ...(reasoning ? buildReasoningFields(reasoning) : {}),
+        },
         finish_reason: "stop",
       }],
       usage: {
