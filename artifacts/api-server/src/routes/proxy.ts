@@ -1080,7 +1080,10 @@ async function handleFriendJsonProxy({
 
 async function handleOpenAIImageGeneration(req: Request, res: Response) {
   const body = req.body as OAIImageGenerationRequest;
-  const selectedModel = body.model && MODEL_REGISTRY.has(body.model) ? body.model : "gemini-2.5-flash-image";
+  if (body.model && !MODEL_REGISTRY.has(body.model)) {
+    throw new HttpStatusError(400, `Unknown model '${body.model}'.`);
+  }
+  const selectedModel = body.model ?? "gemini-2.5-flash-image";
   const modelInfo = getRegisteredModel(selectedModel);
   if (!modelInfo || modelInfo.capability !== "image") {
     throw new HttpStatusError(400, `Model '${selectedModel}' is not an image generation model.`);
