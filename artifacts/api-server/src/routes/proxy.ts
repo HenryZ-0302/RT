@@ -814,6 +814,67 @@ for (const path of ["/v1/models", "/service/catalog"]) {
   router.get(path, requireApiKeyWithQuery, sendModelCatalog);
 }
 
+function formatGeminiDisplayName(modelId: string): string {
+  return modelId
+    .split("-")
+    .map((part) => {
+      if (part === "gemini") return "Gemini";
+      if (/^\d+(?:\.\d+)?$/.test(part)) return part;
+      if (part === "pro") return "Pro";
+      if (part === "flash") return "Flash";
+      if (part === "preview") return "Preview";
+      if (part === "image") return "Image";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ");
+}
+
+function buildGeminiNativeModel(modelId: string) {
+  const registered = MODEL_REGISTRY.get(modelId);
+  const isImage = registered?.capability === "image";
+  const versionMatch = modelId.match(/gemini-(\d+(?:\.\d+)?)/);
+
+  return {
+    name: `models/${modelId}`,
+    baseModelId: modelId,
+    version: versionMatch?.[1] ?? "preview",
+    displayName: formatGeminiDisplayName(modelId),
+    description: registered?.description ?? "Gemini model",
+    supportedGenerationMethods: isImage
+      ? ["generateImages"]
+      : ["generateContent", "streamGenerateContent", "countTokens"],
+    thinking: !isImage && GEMINI_BASE_MODELS.includes(modelId),
+  };
+}
+
+function listGeminiNativeModels(_req: Request, res: Response) {
+  const models = [...GEMINI_BASE_MODELS, ...GEMINI_IMAGE_MODELS]
+    .filter((id) => isModelEnabled(id))
+    .map((id) => buildGeminiNativeModel(id));
+
+  res.json({ models });
+}
+
+function getGeminiNativeModel(req: Request, res: Response) {
+  const rawModel = req.params.model;
+  const modelId = rawModel.startsWith("models/") ? rawModel.slice("models/".length) : rawModel;
+
+  if (![...GEMINI_BASE_MODELS, ...GEMINI_IMAGE_MODELS].includes(modelId) || !isModelEnabled(modelId)) {
+    res.status(404).json({
+      error: {
+        message: `Model 'models/${modelId}' not found`,
+        type: "not_found",
+      },
+    });
+    return;
+  }
+
+  res.json(buildGeminiNativeModel(modelId));
+}
+
+router.get("/v1beta/models", requireApiKeyWithQuery, listGeminiNativeModels);
+router.get("/v1beta/models/:model", requireApiKeyWithQuery, getGeminiNativeModel);
+
 // ---------------------------------------------------------------------------
 // Image format conversion: OpenAI image_url → Anthropic image
 // ---------------------------------------------------------------------------
