@@ -923,6 +923,18 @@ type GeminiNativeImageRequest = {
   config?: Record<string, unknown>;
 };
 
+type GeminiNativeGenerateContentRequest = {
+  contents?: unknown;
+  config?: Record<string, unknown>;
+  generationConfig?: Record<string, unknown>;
+  systemInstruction?: unknown;
+  safetySettings?: unknown;
+  tools?: unknown;
+  toolConfig?: unknown;
+  cachedContent?: string;
+  [key: string]: unknown;
+};
+
 type AnthropicImageSource =
   | { type: "base64"; media_type: string; data: string }
   | { type: "url"; url: string };
@@ -1326,6 +1338,110 @@ async function handleFriendJsonProxy({
   return await fetchRes.json() as Record<string, unknown>;
 }
 
+async function handleFriendSseProxy({
+  backend,
+  path,
+  body,
+  res,
+  timeoutMs = 180_000,
+}: {
+  backend: Extract<Backend, { kind: "friend" }>;
+  path: string;
+  body: unknown;
+  res: Response;
+  timeoutMs?: number;
+}): Promise<void> {
+  const fetchRes = await fetch(`${backend.url}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!fetchRes.ok) {
+    const errText = await fetchRes.text().catch(() => "unknown");
+    throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
+  }
+  if (!fetchRes.body) {
+    throw new HttpStatusError(502, "Peer backend returned no stream body.");
+  }
+
+  setSseHeaders(res);
+  const reader = fetchRes.body.getReader();
+  const decoder = new TextDecoder();
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) writeAndFlush(res, decoder.decode(value, { stream: true }));
+    }
+    const tail = decoder.decode();
+    if (tail) writeAndFlush(res, tail);
+  } finally {
+    reader.releaseLock();
+  }
+
+  res.end();
+}
+
+function normalizeGeminiNativeModel(rawModel: string): string {
+  return rawModel.startsWith("models/") ? rawModel.slice("models/".length) : rawModel;
+}
+
+function getEnabledGeminiNativeChatModel(rawModel: string): string {
+  const model = normalizeGeminiNativeModel(rawModel);
+  if (!GEMINI_BASE_MODELS.includes(model)) {
+    throw new HttpStatusError(400, `Model '${model}' is not a Gemini chat model.`);
+  }
+  if (!isModelEnabled(model)) {
+    throw new HttpStatusError(403, `Model '${model}' is disabled on this service.`);
+  }
+  return model;
+}
+
+function buildGeminiNativeConfig(body: GeminiNativeGenerateContentRequest): Record<string, unknown> | undefined {
+  const config: Record<string, unknown> = {
+    ...(body.config && typeof body.config === "object" ? body.config : {}),
+    ...(body.generationConfig && typeof body.generationConfig === "object" ? body.generationConfig : {}),
+  };
+
+  if (body.systemInstruction !== undefined) config.systemInstruction = body.systemInstruction;
+  if (body.safetySettings !== undefined) config.safetySettings = body.safetySettings;
+  if (body.tools !== undefined) config.tools = body.tools;
+  if (body.toolConfig !== undefined) config.toolConfig = body.toolConfig;
+  if (body.cachedContent !== undefined) config.cachedContent = body.cachedContent;
+
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
+function buildGeminiNativeGenerateArgs(model: string, body: GeminiNativeGenerateContentRequest): Record<string, unknown> {
+  const config = buildGeminiNativeConfig(body);
+  return {
+    model,
+    contents: body.contents ?? [],
+    ...(config ? { config } : {}),
+  };
+}
+
+function estimateGeminiNativeTokensFromContents(contents: unknown): number {
+  const visited = new Set<unknown>();
+
+  const walk = (value: unknown): number => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === "string") return value.length;
+    if (typeof value === "number" || typeof value === "boolean") return String(value).length;
+    if (typeof value !== "object") return 0;
+    if (visited.has(value)) return 0;
+    visited.add(value);
+
+    if (Array.isArray(value)) return value.reduce((sum, item) => sum + walk(item), 0);
+
+    return Object.values(value as Record<string, unknown>).reduce((sum, item) => sum + walk(item), 0);
+  };
+
+  return Math.max(1, Math.ceil(walk(contents) / 4));
+}
+
 async function generateOpenAICompatibleImageResponse(
   req: Request,
   body: OAIImageGenerationRequest,
@@ -1564,6 +1680,261 @@ async function handleGeminiNativeImage(req: Request, res: Response) {
   }
 }
 
+async function handleGeminiNativeGenerateContent(req: Request, res: Response) {
+  const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
+  const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
+  const startTime = Date.now();
+  let backend = pickBackend();
+  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
+  const triedFriendUrls = new Set<string>();
+
+  for (let attempt = 0; ; attempt++) {
+    const backendLabel = backend.kind === "local" ? "local" : backend.label;
+    try {
+      let responseJson: Record<string, unknown>;
+      if (backend.kind === "friend") {
+        triedFriendUrls.add(backend.url);
+        responseJson = await handleFriendJsonProxy({
+          backend,
+          path: `/v1beta/models/${selectedModel}:generateContent`,
+          body,
+        });
+      } else {
+        const client = makeLocalGemini();
+        responseJson = await (client.models as unknown as {
+          generateContent: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+        }).generateContent(buildGeminiNativeGenerateArgs(selectedModel, body));
+      }
+
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") setHealth(backend.url, true);
+      const usage = responseJson["usageMetadata"] as { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+      recordCallStat(
+        backendLabel,
+        duration,
+        usage?.promptTokenCount ?? estimateGeminiNativeTokensFromContents(body.contents),
+        usage?.candidatesTokenCount ?? 0,
+        undefined,
+        selectedModel,
+      );
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "chat",
+        backend: backendLabel,
+        status: 200,
+        duration,
+        stream: false,
+        promptTokens: usage?.promptTokenCount,
+        completionTokens: usage?.candidatesTokenCount,
+        level: "info",
+      });
+      res.json(responseJson);
+      return;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") {
+        setHealth(backend.url, false);
+        const status = err instanceof FriendProxyHttpError ? err.status : 502;
+        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
+          backend = pickBackendExcluding(triedFriendUrls);
+          if (backend && attempt < 3) continue;
+        }
+      }
+      const status = err instanceof HttpStatusError
+        ? err.status
+        : err instanceof FriendProxyHttpError
+          ? err.status
+          : 500;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "chat",
+        backend: backend.kind === "local" ? "local" : backend.label,
+        status,
+        duration,
+        stream: false,
+        level: status >= 500 ? "error" : "warn",
+        error: message,
+      });
+      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
+      throw err;
+    }
+  }
+}
+
+async function handleGeminiNativeStreamGenerateContent(req: Request, res: Response) {
+  const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
+  const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
+  const startTime = Date.now();
+  let backend = pickBackend();
+  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
+  const triedFriendUrls = new Set<string>();
+
+  for (let attempt = 0; ; attempt++) {
+    const backendLabel = backend.kind === "local" ? "local" : backend.label;
+    try {
+      if (backend.kind === "friend") {
+        triedFriendUrls.add(backend.url);
+        await handleFriendSseProxy({
+          backend,
+          path: `/v1beta/models/${selectedModel}:streamGenerateContent`,
+          body,
+          res,
+        });
+      } else {
+        const client = makeLocalGemini();
+        const streamResponse = await (client.models as unknown as {
+          generateContentStream: (args: Record<string, unknown>) => Promise<AsyncIterable<Record<string, unknown>>>;
+        }).generateContentStream(buildGeminiNativeGenerateArgs(selectedModel, body));
+        setSseHeaders(res);
+        for await (const chunk of streamResponse) {
+          writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
+        }
+        res.end();
+      }
+
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") setHealth(backend.url, true);
+      recordCallStat(
+        backendLabel,
+        duration,
+        estimateGeminiNativeTokensFromContents(body.contents),
+        0,
+        undefined,
+        selectedModel,
+      );
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "chat",
+        backend: backendLabel,
+        status: 200,
+        duration,
+        stream: true,
+        level: "info",
+      });
+      return;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") {
+        setHealth(backend.url, false);
+        const status = err instanceof FriendProxyHttpError ? err.status : 502;
+        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
+          backend = pickBackendExcluding(triedFriendUrls);
+          if (backend && attempt < 3 && !res.headersSent) continue;
+        }
+      }
+      const status = err instanceof HttpStatusError
+        ? err.status
+        : err instanceof FriendProxyHttpError
+          ? err.status
+          : 500;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "chat",
+        backend: backend.kind === "local" ? "local" : backend.label,
+        status,
+        duration,
+        stream: true,
+        level: status >= 500 ? "error" : "warn",
+        error: message,
+      });
+      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
+      throw err;
+    }
+  }
+}
+
+async function handleGeminiNativeCountTokens(req: Request, res: Response) {
+  const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
+  const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
+  const startTime = Date.now();
+  let backend = pickBackend();
+  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
+  const triedFriendUrls = new Set<string>();
+
+  for (let attempt = 0; ; attempt++) {
+    const backendLabel = backend.kind === "local" ? "local" : backend.label;
+    try {
+      let responseJson: Record<string, unknown>;
+      if (backend.kind === "friend") {
+        triedFriendUrls.add(backend.url);
+        responseJson = await handleFriendJsonProxy({
+          backend,
+          path: `/v1beta/models/${selectedModel}:countTokens`,
+          body,
+        });
+      } else {
+        const client = makeLocalGemini();
+        const modelApi = client.models as unknown as Record<string, unknown>;
+        const countTokens = modelApi["countTokens"];
+        if (typeof countTokens === "function") {
+          responseJson = await (countTokens as (args: Record<string, unknown>) => Promise<Record<string, unknown>>)({
+            model: selectedModel,
+            contents: body.contents ?? [],
+          });
+        } else {
+          responseJson = { totalTokens: estimateGeminiNativeTokensFromContents(body.contents) };
+        }
+      }
+
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") setHealth(backend.url, true);
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "chat",
+        backend: backendLabel,
+        status: 200,
+        duration,
+        stream: false,
+        level: "info",
+      });
+      res.json(responseJson);
+      return;
+    } catch (err) {
+      const duration = Date.now() - startTime;
+      if (backend.kind === "friend") {
+        setHealth(backend.url, false);
+        const status = err instanceof FriendProxyHttpError ? err.status : 502;
+        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
+          backend = pickBackendExcluding(triedFriendUrls);
+          if (backend && attempt < 3) continue;
+        }
+      }
+      const status = err instanceof HttpStatusError
+        ? err.status
+        : err instanceof FriendProxyHttpError
+          ? err.status
+          : 500;
+      const message = err instanceof Error ? err.message : "Unknown error";
+      pushRequestLog({
+        method: req.method,
+        path: req.path,
+        model: selectedModel,
+        capability: "chat",
+        backend: backend.kind === "local" ? "local" : backend.label,
+        status,
+        duration,
+        stream: false,
+        level: status >= 500 ? "error" : "warn",
+        error: message,
+      });
+      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
+      throw err;
+    }
+  }
+}
+
 async function handleChatCompletions(req: Request, res: Response) {
   const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
     model?: string;
@@ -1748,6 +2119,57 @@ router.post(/^\/v1beta\/models\/([^:]+):generateImages$/, requireApiKey, async (
   try {
     req.params.model = req.params[0];
     await handleGeminiNativeImage(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post("/v1beta/models/:model/generateContent", requireApiKey, async (req, res) => {
+  try {
+    await handleGeminiNativeGenerateContent(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post(/^\/v1beta\/models\/([^:]+):generateContent$/, requireApiKey, async (req, res) => {
+  try {
+    req.params.model = req.params[0];
+    await handleGeminiNativeGenerateContent(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post("/v1beta/models/:model/streamGenerateContent", requireApiKey, async (req, res) => {
+  try {
+    await handleGeminiNativeStreamGenerateContent(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post(/^\/v1beta\/models\/([^:]+):streamGenerateContent$/, requireApiKey, async (req, res) => {
+  try {
+    req.params.model = req.params[0];
+    await handleGeminiNativeStreamGenerateContent(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post("/v1beta/models/:model/countTokens", requireApiKey, async (req, res) => {
+  try {
+    await handleGeminiNativeCountTokens(req, res);
+  } catch (err) {
+    sendApiError(req, res, err);
+  }
+});
+
+router.post(/^\/v1beta\/models\/([^:]+):countTokens$/, requireApiKey, async (req, res) => {
+  try {
+    req.params.model = req.params[0];
+    await handleGeminiNativeCountTokens(req, res);
   } catch (err) {
     sendApiError(req, res, err);
   }
