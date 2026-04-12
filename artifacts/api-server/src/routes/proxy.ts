@@ -1065,14 +1065,13 @@ function extractImageRequestFromChatMessages(messages: OAIMessage[]): {
 function buildChatCompletionFromImageResponse(model: string, responseJson: Record<string, unknown>): Record<string, unknown> {
   const created = Math.floor(Date.now() / 1000);
   const images = Array.isArray(responseJson.data) ? responseJson.data as Array<Record<string, unknown>> : [];
-  const content = images.length > 0
-    ? images
-      .map((image, index) => {
-        const b64 = typeof image.b64_json === "string" ? image.b64_json : "";
-        const mimeType = typeof image.mime_type === "string" ? image.mime_type : "image/png";
-        return `![generated image ${index + 1}](data:${mimeType};base64,${b64})`;
-      })
-      .join("\n\n")
+  const normalizedImages = images.map((image, index) => ({
+    index,
+    b64_json: typeof image.b64_json === "string" ? image.b64_json : "",
+    mime_type: typeof image.mime_type === "string" ? image.mime_type : "image/png",
+  }));
+  const content = normalizedImages.length > 0
+    ? `Generated ${normalizedImages.length} image${normalizedImages.length > 1 ? "s" : ""}. Read choices[0].message.images for the base64 payload.`
     : "Image generation completed, but no image data was returned.";
 
   return {
@@ -1086,10 +1085,12 @@ function buildChatCompletionFromImageResponse(model: string, responseJson: Recor
         message: {
           role: "assistant",
           content,
+          images: normalizedImages,
         },
         finish_reason: "stop",
       },
     ],
+    images: normalizedImages,
     usage: {
       prompt_tokens: 0,
       completion_tokens: 0,
