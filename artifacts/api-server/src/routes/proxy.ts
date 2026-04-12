@@ -490,6 +490,17 @@ function writeAndFlush(res: Response, data: string) {
   (res as unknown as { flush?: () => void }).flush?.();
 }
 
+function sanitizeThinkingText(raw: string): string {
+  return raw.replace(/<\/?think>/g, "");
+}
+
+function buildReasoningFields(reasoning: string): { reasoning: string; reasoning_content: string } {
+  return {
+    reasoning,
+    reasoning_content: reasoning,
+  };
+}
+
 async function fakeStreamResponse(
   res: Response,
   json: Record<string, unknown>,
@@ -1761,7 +1772,6 @@ async function handleClaude({
 
       let inputTokens = 0;
       let outputTokens = 0;
-      let thinkingStarted = false;
       let ttftMs: number | undefined;
       // Track current tool_use block index for streaming
       let currentToolIndex = -1;
@@ -1777,15 +1787,8 @@ async function handleClaude({
           const block = event.content_block;
 
           if (block.type === "thinking") {
-            if (!thinkingStarted) {
-              thinkingStarted = true;
-              writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { content: "<thinking>\n" }, finish_reason: null }] })}\n\n`);
-            }
+            continue;
           } else if (block.type === "tool_use") {
-            if (thinkingStarted) {
-              writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { content: "\n</thinking>\n\n" }, finish_reason: null }] })}\n\n`);
-              thinkingStarted = false;
-            }
             // Map this content block index to tool_calls array index
             currentToolIndex = toolCallCount++;
             toolIndexMap.set(event.index, currentToolIndex);
@@ -1793,18 +1796,15 @@ async function handleClaude({
             // Send tool_call start chunk
             writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { tool_calls: [{ index: currentToolIndex, id: block.id, type: "function", function: { name: block.name, arguments: "" } }] }, finish_reason: null }] })}\n\n`);
           } else if (block.type === "text") {
-            if (thinkingStarted) {
-              writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { content: "\n</thinking>\n\n" }, finish_reason: null }] })}\n\n`);
-              thinkingStarted = false;
-            }
+            continue;
           }
 
         } else if (event.type === "content_block_delta") {
           const delta = event.delta;
 
           if (delta.type === "thinking_delta") {
-            const cleaned = delta.thinking.replace(/<\/?think>/g, "");
-            if (cleaned) writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { content: cleaned }, finish_reason: null }] })}\n\n`);
+            const cleaned = sanitizeThinkingText(delta.thinking);
+            if (cleaned) writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: buildReasoningFields(cleaned), finish_reason: null }] })}\n\n`);
           } else if (delta.type === "text_delta") {
             if (ttftMs === undefined) ttftMs = Date.now() - startTime;
             writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { content: delta.text }, finish_reason: null }] })}\n\n`);
@@ -1848,12 +1848,13 @@ async function handleClaude({
     }
 
     const textParts: string[] = [];
+    const reasoningParts: string[] = [];
     const toolCalls: OAIToolCall[] = [];
 
     for (const block of result.content) {
       if (block.type === "thinking") {
-        const rawThinking = (block as { type: "thinking"; thinking: string }).thinking.replace(/<\/?think>/g, "");
-        textParts.push(`<thinking>\n${rawThinking}\n</thinking>`);
+        const rawThinking = sanitizeThinkingText((block as { type: "thinking"; thinking: string }).thinking);
+        if (rawThinking) reasoningParts.push(rawThinking);
       } else if (block.type === "text") {
         textParts.push((block as { type: "text"; text: string }).text);
       } else if (block.type === "tool_use") {
@@ -1870,6 +1871,7 @@ async function handleClaude({
     }
 
     const text = textParts.join("\n\n");
+    const reasoningText = reasoningParts.join("\n\n");
     const stopReason = result.stop_reason;
     const finishReason = stopReason === "tool_use" ? "tool_calls" : (stopReason ?? "stop");
 
@@ -1883,6 +1885,7 @@ async function handleClaude({
         message: {
           role: "assistant",
           content: text || null,
+          ...(reasoningText ? buildReasoningFields(reasoningText) : {}),
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
         finish_reason: finishReason,
