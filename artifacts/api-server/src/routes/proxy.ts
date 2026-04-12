@@ -22,6 +22,10 @@ const OPENAI_THINKING_ALIASES = OPENAI_CHAT_MODELS
   .filter((m) => m.startsWith("o"))
   .map((m) => `${m}-thinking`);
 
+const OPENAI_IMAGE_MODELS = [
+  "gpt-image-1",
+];
+
 const ANTHROPIC_BASE_MODELS = [
   "claude-opus-4-6", "claude-opus-4-5", "claude-opus-4-1",
   "claude-sonnet-4-6", "claude-sonnet-4-5",
@@ -57,7 +61,7 @@ const OPENROUTER_FEATURED = [
 
 type RegisteredProvider = "openai" | "anthropic" | "gemini" | "openrouter";
 type ModelCapability = "chat" | "image";
-type ModelGroup = "openai" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
+type ModelGroup = "openai" | "openai_image" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
 type ModelTestMode = "chat" | "image";
 
 type RegisteredModel = {
@@ -85,6 +89,14 @@ const REGISTERED_MODELS: RegisteredModel[] = [
     group: "openai" as const,
     testMode: "chat" as const,
     description: "OpenAI thinking alias",
+  })),
+  ...OPENAI_IMAGE_MODELS.map((id) => ({
+    id,
+    provider: "openai" as const,
+    capability: "image" as const,
+    group: "openai_image" as const,
+    testMode: "image" as const,
+    description: "OpenAI image generation model",
   })),
   ...ANTHROPIC_BASE_MODELS.flatMap((id) => ([
     {
@@ -378,6 +390,17 @@ function makeLocalOpenAI(): OpenAI {
     );
   }
   return new OpenAI({ apiKey, baseURL });
+}
+
+function getLocalOpenAIConfig(): { apiKey: string; baseURL: string } {
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  if (!apiKey || !baseURL) {
+    throw new Error(
+      "OpenAI integration is not configured. Please enable the platform OpenAI integration before using GPT models."
+    );
+  }
+  return { apiKey, baseURL };
 }
 
 function makeLocalAnthropic(): Anthropic {
@@ -925,6 +948,20 @@ async function imageInputToPart(value: string): Promise<Record<string, unknown>>
   return { inlineData: { mimeType, data: buffer.toString("base64") } };
 }
 
+async function imageInputToBlob(value: string): Promise<Blob> {
+  const dataUrl = parseDataUrl(value);
+  if (dataUrl) {
+    return new Blob([Buffer.from(dataUrl.data, "base64")], { type: dataUrl.mimeType });
+  }
+
+  const response = await fetch(value, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) {
+    throw new HttpStatusError(400, `Failed to fetch input image: HTTP ${response.status}`);
+  }
+  const mimeType = response.headers.get("content-type")?.split(";")[0] || detectMimeTypeFromUrl(value);
+  return new Blob([Buffer.from(await response.arrayBuffer())], { type: mimeType });
+}
+
 async function buildGeminiImageContents(prompt: string, imageInputs: string[]): Promise<Record<string, unknown>[]> {
   const parts: Record<string, unknown>[] = [];
   for (const input of imageInputs) {
@@ -949,6 +986,68 @@ function extractGeneratedImages(response: {
     }
   }
   return images;
+}
+
+async function handleOpenAIImage({
+  model,
+  prompt,
+  imageInputs,
+  n,
+  size,
+}: {
+  model: string;
+  prompt: string;
+  imageInputs: string[];
+  n?: number;
+  size?: string;
+}): Promise<Record<string, unknown>> {
+  const { apiKey, baseURL } = getLocalOpenAIConfig();
+  const normalizedBaseURL = baseURL.replace(/\/+$/, "");
+
+  if (imageInputs.length > 0) {
+    const form = new FormData();
+    form.set("model", model);
+    form.set("prompt", prompt);
+    form.set("response_format", "b64_json");
+    if (typeof n === "number") form.set("n", String(Math.max(1, Math.min(4, Math.floor(n)))));
+    if (size) form.set("size", size);
+    for (let i = 0; i < imageInputs.length; i++) {
+      form.append("image", await imageInputToBlob(imageInputs[i]), `image-${i + 1}.png`);
+    }
+
+    const response = await fetch(`${normalizedBaseURL}/images/edits`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "unknown");
+      throw new HttpStatusError(response.status, `OpenAI image edit failed: ${errText}`);
+    }
+    return await response.json() as Record<string, unknown>;
+  }
+
+  const response = await fetch(`${normalizedBaseURL}/images/generations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      prompt,
+      response_format: "b64_json",
+      ...(typeof n === "number" ? { n: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
+      ...(size ? { size } : {}),
+    }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "unknown");
+    throw new HttpStatusError(response.status, `OpenAI image generation failed: ${errText}`);
+  }
+  return await response.json() as Record<string, unknown>;
 }
 
 // Convert OpenAI tools array → Anthropic tools array
@@ -1102,6 +1201,7 @@ async function handleOpenAIImageGeneration(req: Request, res: Response) {
     ...(typeof body.image === "string" ? [body.image] : []),
     ...(Array.isArray(body.images) ? body.images.filter((item): item is string => typeof item === "string" && item.length > 0) : []),
   ];
+  const provider = modelInfo.provider;
 
   const startTime = Date.now();
   let backend = pickBackend();
@@ -1128,17 +1228,27 @@ async function handleOpenAIImageGeneration(req: Request, res: Response) {
           },
         });
       } else {
-        const result = await handleGeminiImage({
-          model: selectedModel,
-          prompt,
-          imageInputs,
-          n: body.n,
-          size: body.size,
-        });
-        responseJson = {
-          created: Math.floor(Date.now() / 1000),
-          data: result.images.map((image) => ({ b64_json: image.b64_json, mime_type: image.mimeType })),
-        };
+        if (provider === "openai") {
+          responseJson = await handleOpenAIImage({
+            model: selectedModel,
+            prompt,
+            imageInputs,
+            n: body.n,
+            size: body.size,
+          });
+        } else {
+          const result = await handleGeminiImage({
+            model: selectedModel,
+            prompt,
+            imageInputs,
+            n: body.n,
+            size: body.size,
+          });
+          responseJson = {
+            created: Math.floor(Date.now() / 1000),
+            data: result.images.map((image) => ({ b64_json: image.b64_json, mime_type: image.mimeType })),
+          };
+        }
       }
 
       const duration = Date.now() - startTime;

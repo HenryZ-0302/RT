@@ -20,7 +20,8 @@ import { cn } from "../lib/utils";
 interface ModelStatus { id: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
 type Provider = "openai" | "anthropic" | "gemini" | "openrouter";
-type GroupKey = "openai" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
+type GroupKey = "openai" | "openai_image" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
+type CapabilitySection = "chat" | "image";
 
 interface ModelEntry {
   id: string;
@@ -90,6 +91,10 @@ export const GEMINI_IMAGE_MODELS: ModelEntry[] = [
   { id: "gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "gemini", desc: "快速图片生成与编辑模型", context: "Image", badge: "image" },
 ];
 
+export const OPENAI_IMAGE_MODELS: ModelEntry[] = [
+  { id: "gpt-image-1", label: "GPT Image 1", provider: "openai", desc: "OpenAI 图片生成与编辑模型", context: "Image", badge: "image" },
+];
+
 export const OPENROUTER_MODELS: ModelEntry[] = [
   { id: "x-ai/grok-4.20", label: "Grok 4.20", provider: "openrouter", desc: "xAI 最新旗舰推理模型", badge: "tools" },
   { id: "x-ai/grok-4.1-fast", label: "Grok 4.1 Fast", provider: "openrouter", desc: "xAI 高速对话模型", badge: "tools" },
@@ -117,10 +122,16 @@ const PROVIDER_COLORS: Record<Provider, { border: string; bg: string; dot: strin
 
 const GROUP_META: Record<GroupKey, { title: string; provider: Provider; models: ModelEntry[] }> = {
   openai: { title: "OpenAI", provider: "openai", models: OPENAI_MODELS },
+  openai_image: { title: "OpenAI", provider: "openai", models: OPENAI_IMAGE_MODELS },
   anthropic: { title: "Anthropic Claude", provider: "anthropic", models: ANTHROPIC_MODELS },
   gemini: { title: "Google Gemini", provider: "gemini", models: GEMINI_MODELS },
-  gemini_image: { title: "Google Gemini Images", provider: "gemini", models: GEMINI_IMAGE_MODELS },
+  gemini_image: { title: "Google Gemini", provider: "gemini", models: GEMINI_IMAGE_MODELS },
   openrouter: { title: "OpenRouter", provider: "openrouter", models: OPENROUTER_MODELS },
+};
+
+const SECTION_META: Record<CapabilitySection, { title: string; groups: GroupKey[] }> = {
+  chat: { title: "文本模型", groups: ["openai", "anthropic", "gemini", "openrouter"] },
+  image: { title: "图片模型", groups: ["openai_image", "gemini_image"] },
 };
 
 function Badge({ variant }: { variant: string }) {
@@ -342,8 +353,10 @@ export function ModelsPage({
       </Card>
 
       {/* Group Lists */}
-      <div className="space-y-4">
-        {allGroups.map(({ key, title, models, provider }) => {
+      <div className="space-y-6">
+        {(Object.entries(SECTION_META) as Array<[CapabilitySection, { title: string; groups: GroupKey[] }]>).map(([sectionKey, section]) => {
+          const sectionGroups = allGroups.filter((group) => section.groups.includes(group.key));
+          const visibleGroups = sectionGroups.map(({ key, title, models, provider }) => {
           const c = PROVIDER_COLORS[provider];
           const grpSummary = summary[key] ?? { total: models.length, enabled: models.length };
           const isExpanded = expandedGroups[key];
@@ -475,6 +488,22 @@ export function ModelsPage({
                 </div>
               )}
             </div>
+          );
+          });
+
+          const renderedGroups = visibleGroups.filter(Boolean);
+          if (renderedGroups.length === 0) return null;
+
+          return (
+            <section key={sectionKey} className="space-y-4">
+              <div className="flex items-center gap-3 px-1">
+                <div className="w-1.5 h-5 rounded-full bg-gradient-to-b from-primary to-primary/50" />
+                <h2 className="text-lg font-bold tracking-tight">{section.title}</h2>
+              </div>
+              <div className="space-y-4">
+                {renderedGroups}
+              </div>
+            </section>
           );
         })}
       </div>
