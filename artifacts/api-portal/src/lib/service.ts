@@ -20,6 +20,9 @@ export const servicePaths = {
   status(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/status`;
   },
+  healthcheck(baseUrl: string): string {
+    return `${serviceBase(baseUrl)}/healthcheck`;
+  },
   bootstrap(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/bootstrap`;
   },

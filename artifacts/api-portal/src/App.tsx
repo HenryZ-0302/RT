@@ -411,6 +411,7 @@ export default function App() {
             </Route>
             <Route path="/settings">
               <HomePage 
+                baseUrl={baseUrl}
                 displayUrl={displayUrl}
                 apiKey={apiKey}
                 sillyTavernMode={sillyTavernMode}
