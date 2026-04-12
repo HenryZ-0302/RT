@@ -1009,6 +1009,95 @@ async function imageInputToPart(value: string): Promise<Record<string, unknown>>
   return { inlineData: { mimeType, data: buffer.toString("base64") } };
 }
 
+function extractImageRequestFromChatMessages(messages: OAIMessage[]): {
+  prompt: string;
+  image?: string;
+  images?: string[];
+} {
+  const latestUserMessage = [...messages].reverse().find((msg) => msg.role === "user");
+  if (!latestUserMessage) {
+    throw new HttpStatusError(400, "Image generation via chat completions requires at least one user message.");
+  }
+
+  const systemPrompt = messages
+    .filter((msg) => msg.role === "system")
+    .map((msg) => {
+      if (typeof msg.content === "string") return msg.content.trim();
+      if (!Array.isArray(msg.content)) return "";
+      return msg.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof (part as { text?: unknown }).text === "string")
+        .map((part) => part.text.trim())
+        .filter(Boolean)
+        .join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  const textParts: string[] = [];
+  const imageInputs: string[] = [];
+
+  if (typeof latestUserMessage.content === "string") {
+    textParts.push(latestUserMessage.content.trim());
+  } else if (Array.isArray(latestUserMessage.content)) {
+    for (const part of latestUserMessage.content) {
+      if (part.type === "text" && typeof (part as { text?: unknown }).text === "string") {
+        textParts.push((part as { text: string }).text.trim());
+      } else if (part.type === "image_url") {
+        const url = (part as { image_url?: { url?: string } }).image_url?.url;
+        if (typeof url === "string" && url.length > 0) imageInputs.push(url);
+      }
+    }
+  }
+
+  const userPrompt = textParts.filter(Boolean).join("\n");
+  const prompt = [systemPrompt, userPrompt].filter(Boolean).join("\n\n").trim();
+  if (!prompt) {
+    throw new HttpStatusError(400, "Image generation via chat completions requires a text prompt in the latest user message.");
+  }
+
+  return {
+    prompt,
+    ...(imageInputs[0] ? { image: imageInputs[0] } : {}),
+    ...(imageInputs.length > 1 ? { images: imageInputs.slice(1) } : {}),
+  };
+}
+
+function buildChatCompletionFromImageResponse(model: string, responseJson: Record<string, unknown>): Record<string, unknown> {
+  const created = Math.floor(Date.now() / 1000);
+  const images = Array.isArray(responseJson.data) ? responseJson.data as Array<Record<string, unknown>> : [];
+  const content = images.length > 0
+    ? images
+      .map((image, index) => {
+        const b64 = typeof image.b64_json === "string" ? image.b64_json : "";
+        const mimeType = typeof image.mime_type === "string" ? image.mime_type : "image/png";
+        return `![generated image ${index + 1}](data:${mimeType};base64,${b64})`;
+      })
+      .join("\n\n")
+    : "Image generation completed, but no image data was returned.";
+
+  return {
+    id: `chatcmpl-img-${Date.now()}`,
+    object: "chat.completion",
+    created,
+    model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content,
+        },
+        finish_reason: "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    },
+  };
+}
+
 async function imageInputToBlob(value: string): Promise<Blob> {
   const dataUrl = parseDataUrl(value);
   if (dataUrl) {
@@ -1236,8 +1325,10 @@ async function handleFriendJsonProxy({
   return await fetchRes.json() as Record<string, unknown>;
 }
 
-async function handleOpenAIImageGeneration(req: Request, res: Response) {
-  const body = req.body as OAIImageGenerationRequest;
+async function generateOpenAICompatibleImageResponse(
+  req: Request,
+  body: OAIImageGenerationRequest,
+): Promise<Record<string, unknown>> {
   if (body.model && !MODEL_REGISTRY.has(body.model)) {
     throw new HttpStatusError(400, `Unknown model '${body.model}'.`);
   }
@@ -1324,8 +1415,7 @@ async function handleOpenAIImageGeneration(req: Request, res: Response) {
         stream: false,
         level: "info",
       });
-      res.json(responseJson);
-      return;
+      return responseJson;
     } catch (err) {
       const duration = Date.now() - startTime;
       if (backend.kind === "friend") {
@@ -1358,6 +1448,15 @@ async function handleOpenAIImageGeneration(req: Request, res: Response) {
       throw err;
     }
   }
+}
+
+async function handleOpenAIImageGeneration(req: Request, res: Response) {
+  const body = req.body as OAIImageGenerationRequest;
+  if (body.response_format && body.response_format !== "b64_json") {
+    throw new HttpStatusError(400, "This service only supports response_format 'b64_json' for image generation.");
+  }
+  const responseJson = await generateOpenAICompatibleImageResponse(req, body);
+  res.json(responseJson);
 }
 
 async function handleGeminiNativeImage(req: Request, res: Response) {
@@ -1480,13 +1579,30 @@ async function handleChatCompletions(req: Request, res: Response) {
     return;
   }
   if (model && isImageModel(model)) {
-    res.status(400).json({
-      error: {
-        message: `Model '${model}' is image-only. Use /v1/images/generations or /v1beta/models/${model}:generateImages instead.`,
-        type: "invalid_request_error",
-        code: "wrong_model_capability",
-      },
+    if (tools?.length) {
+      res.status(400).json({
+        error: {
+          message: `Model '${model}' does not support tools on /v1/chat/completions.`,
+          type: "invalid_request_error",
+          code: "unsupported_tools",
+        },
+      });
+      return;
+    }
+    const imageRequest = extractImageRequestFromChatMessages(messages);
+    const imageResponse = await generateOpenAICompatibleImageResponse(req, {
+      model,
+      prompt: imageRequest.prompt,
+      image: imageRequest.image,
+      images: imageRequest.images,
+      response_format: "b64_json",
     });
+    const chatResponse = buildChatCompletionFromImageResponse(model, imageResponse);
+    if (stream) {
+      await fakeStreamResponse(res, chatResponse, Date.now());
+    } else {
+      res.json(chatResponse);
+    }
     return;
   }
 
