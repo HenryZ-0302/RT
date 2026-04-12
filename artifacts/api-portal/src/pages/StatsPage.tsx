@@ -76,7 +76,7 @@ function getModelPrice(model: string): { input: number; output: number } {
   if (MODEL_PRICING[model]) return MODEL_PRICING[model];
   const stripped = model.replace(/^[a-z0-9_-]+\//, "");
   if (MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
-  const base = stripped.replace(/-(thinking-visible|thinking|latest|preview)$/g, "").replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  const base = stripped.replace(/-(thinking|latest|preview)$/g, "").replace(/-\d{4}-\d{2}-\d{2}$/, "");
   if (MODEL_PRICING[base]) return MODEL_PRICING[base];
   for (const [key, val] of Object.entries(MODEL_PRICING)) {
     if (stripped.startsWith(key) || base.startsWith(key)) return val;

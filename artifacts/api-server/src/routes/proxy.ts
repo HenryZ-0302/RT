@@ -53,7 +53,6 @@ const OPENAI_MODELS = OPENAI_CHAT_MODELS.map((id) => ({ id, description: "OpenAI
 const CLAUDE_MODELS = ANTHROPIC_BASE_MODELS.flatMap((id) => [
   { id, description: "Anthropic Claude model" },
   { id: `${id}-thinking`, description: "Extended thinking (hidden)" },
-  { id: `${id}-thinking-visible`, description: "Extended thinking (visible)" },
 ]);
 
 const ALL_MODELS = [
@@ -62,10 +61,9 @@ const ALL_MODELS = [
   ...ANTHROPIC_BASE_MODELS.flatMap((id) => [
     { id },
     { id: `${id}-thinking` },
-    { id: `${id}-thinking-visible` },
   ]),
   ...GEMINI_BASE_MODELS.flatMap((id) => [
-    { id }, { id: `${id}-thinking` }, { id: `${id}-thinking-visible` },
+    { id }, { id: `${id}-thinking` },
   ]),
   ...OPENROUTER_FEATURED.map((id) => ({ id })),
 ];
@@ -112,12 +110,10 @@ for (const id of OPENAI_THINKING_ALIASES) { MODEL_PROVIDER_MAP.set(id, "openai")
 for (const base of ANTHROPIC_BASE_MODELS) {
   MODEL_PROVIDER_MAP.set(base, "anthropic");
   MODEL_PROVIDER_MAP.set(`${base}-thinking`, "anthropic");
-  MODEL_PROVIDER_MAP.set(`${base}-thinking-visible`, "anthropic");
 }
 for (const base of GEMINI_BASE_MODELS) {
   MODEL_PROVIDER_MAP.set(base, "gemini");
   MODEL_PROVIDER_MAP.set(`${base}-thinking`, "gemini");
-  MODEL_PROVIDER_MAP.set(`${base}-thinking-visible`, "gemini");
 }
 for (const id of OPENROUTER_FEATURED) { MODEL_PROVIDER_MAP.set(id, "openrouter"); }
 
@@ -861,13 +857,10 @@ async function handleChatCompletions(req: Request, res: Response) {
         triedFriendUrls.add(backend.url);
         result = await handleFriendProxy({ req, res, backend, model: selectedModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
       } else if (isClaudeModel) {
-        const thinkingVisible = selectedModel.endsWith("-thinking-visible");
-        const thinkingEnabled = thinkingVisible || selectedModel.endsWith("-thinking");
-        const actualModel = thinkingVisible
-          ? selectedModel.replace(/-thinking-visible$/, "")
-          : thinkingEnabled
-            ? selectedModel.replace(/-thinking$/, "")
-            : selectedModel;
+        const thinkingEnabled = selectedModel.endsWith("-thinking");
+        const actualModel = thinkingEnabled
+          ? selectedModel.replace(/-thinking$/, "")
+          : selectedModel;
         const CLAUDE_MODEL_MAX: Record<string, number> = {
           "claude-haiku-4-5": 8096,
           "claude-sonnet-4-5": 64000,
@@ -882,13 +875,10 @@ async function handleChatCompletions(req: Request, res: Response) {
         const client = makeLocalAnthropic();
         result = await handleClaude({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: resolvedMaxTokens, thinking: thinkingEnabled, tools, toolChoice: tool_choice, startTime });
       } else if (isGeminiModel) {
-        const thinkingVisible = selectedModel.endsWith("-thinking-visible");
-        const thinkingEnabled = thinkingVisible || selectedModel.endsWith("-thinking");
-        const actualModel = thinkingVisible
-          ? selectedModel.replace(/-thinking-visible$/, "")
-          : thinkingEnabled
-            ? selectedModel.replace(/-thinking$/, "")
-            : selectedModel;
+        const thinkingEnabled = selectedModel.endsWith("-thinking");
+        const actualModel = thinkingEnabled
+          ? selectedModel.replace(/-thinking$/, "")
+          : selectedModel;
         result = await handleGemini({ req, res, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, thinking: thinkingEnabled, startTime });
       } else if (isOpenRouterModel) {
         const client = makeLocalOpenRouter();

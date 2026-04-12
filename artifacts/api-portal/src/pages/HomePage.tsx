@@ -97,7 +97,7 @@ export function HomePage({
             { icon: GitMerge, title: "多后端路由", desc: "按模型名称自动路由到 OpenAI、Anthropic、Gemini 或 OpenRouter。", color: "text-indigo-500", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
             { icon: FileType2, title: "多格式兼容", desc: "同时支持 OpenAI、Claude Messages、Gemini Native 三种请求格式，自动转换。", color: "text-blue-500", bg: "bg-blue-500/10", border: "border-blue-500/20" },
             { icon: Blocks, title: "工具 / 函数调用", desc: "完整支持 OpenAI tools + tool_calls，自动转换到各后端原生格式。", color: "text-amber-500", bg: "bg-amber-500/10", border: "border-amber-500/20" },
-            { icon: Lightbulb, title: "扩展思考模式", desc: "Claude、Gemini、o-series 均支持 -thinking 和 -thinking-visible 后缀别名。", color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+            { icon: Lightbulb, title: "扩展思考模式", desc: "Claude、Gemini、o-series 均支持 -thinking 后缀别名。", color: "text-purple-500", bg: "bg-purple-500/10", border: "border-purple-500/20" },
             { icon: KeyRound, title: "多种认证方式", desc: "支持 Bearer Token、x-goog-api-key 请求头、?key= URL 参数三种方式。", color: "text-emerald-500", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
             { icon: Zap, title: "流式输出 SSE", desc: "所有端点均支持 SSE 流式输出，包括 Claude 和 Gemini 原生格式端点。", color: "text-rose-500", bg: "bg-rose-500/10", border: "border-rose-500/20" },
           ].map((f) => (
