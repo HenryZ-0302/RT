@@ -43,8 +43,10 @@ export default function App() {
   const [modelStatus, setModelStatus] = useState<ModelStatus[]>([]);
   const [modelSummary, setModelSummary] = useState<Record<string, GroupSummary>>({});
 
-  const baseUrl = window.location.origin;
-  const displayUrl: string = (import.meta.env.VITE_BASE_URL as string | undefined) ?? window.location.origin;
+  const configuredBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)
+    ?? (import.meta.env.VITE_BASE_URL as string | undefined);
+  const baseUrl = configuredBaseUrl ?? window.location.origin;
+  const displayUrl: string = configuredBaseUrl ?? window.location.origin;
 
   const applyMetricsPayload = useCallback((payload: MetricsResponse) => {
     const parsed: Record<string, BackendStat> = {};
