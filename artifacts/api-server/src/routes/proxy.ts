@@ -1590,6 +1590,16 @@ async function handleChatCompletions(req: Request, res: Response) {
       });
       return;
     }
+    if (stream) {
+      res.status(400).json({
+        error: {
+          message: `Model '${model}' does not support stream=true on /v1/chat/completions. Use non-stream chat completions or an image-specific endpoint instead.`,
+          type: "invalid_request_error",
+          code: "unsupported_stream",
+        },
+      });
+      return;
+    }
     const imageRequest = extractImageRequestFromChatMessages(messages);
     const imageResponse = await generateOpenAICompatibleImageResponse(req, {
       model,
@@ -1599,11 +1609,7 @@ async function handleChatCompletions(req: Request, res: Response) {
       response_format: "b64_json",
     });
     const chatResponse = buildChatCompletionFromImageResponse(model, imageResponse);
-    if (stream) {
-      await fakeStreamResponse(res, chatResponse, Date.now());
-    } else {
-      res.json(chatResponse);
-    }
+    res.json(chatResponse);
     return;
   }
 
