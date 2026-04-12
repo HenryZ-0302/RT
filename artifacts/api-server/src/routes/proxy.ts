@@ -1008,7 +1008,6 @@ async function handleOpenAIImage({
     const form = new FormData();
     form.set("model", model);
     form.set("prompt", prompt);
-    form.set("response_format", "b64_json");
     if (typeof n === "number") form.set("n", String(Math.max(1, Math.min(4, Math.floor(n)))));
     if (size) form.set("size", size);
     for (let i = 0; i < imageInputs.length; i++) {
@@ -1037,7 +1036,6 @@ async function handleOpenAIImage({
     body: JSON.stringify({
       model,
       prompt,
-      response_format: "b64_json",
       ...(typeof n === "number" ? { n: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
       ...(size ? { size } : {}),
     }),
