@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { HeartPulse, Info } from "lucide-react";
+import { HeartPulse } from "lucide-react";
 import { cn } from "../lib/utils";
 import { servicePaths } from "../lib/service";
 import { FALLBACK_VERSION_INFO, type PortalVersionInfo } from "../lib/version";
@@ -163,20 +163,6 @@ export function DashboardPage({
               <div className="text-xs text-muted-foreground mt-2">{versionDateText}</div>
             </div>
           </div>
-        </div>
-      </Card>
-
-      <Card className="bg-primary/5 border-primary/20 shadow-md shadow-primary/5">
-        <div className="flex items-center gap-2 mb-4 text-primary">
-          <Info size={18} />
-          <h2 className="text-sm font-bold tracking-widest uppercase">当前版本更新</h2>
-        </div>
-        <div className="mb-4 relative">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="font-mono text-sm font-bold text-primary">v{versionInfo.version}</span>
-            <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{versionInfo.releaseDate}</span>
-          </div>
-          <p className="text-sm text-muted-foreground leading-relaxed ml-1">{versionInfo.releaseNotes}</p>
         </div>
       </Card>
 

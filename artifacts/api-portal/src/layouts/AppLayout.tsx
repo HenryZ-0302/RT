@@ -5,6 +5,7 @@ import {
   BarChart2, 
   Server, 
   ScrollText, 
+  BookOpen,
   Sun,
   Moon,
   ChevronLeft,
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { href: "/stats", label: "统计", icon: BarChart2 },
   { href: "/models", label: "模型", icon: Server },
   { href: "/logs", label: "日志", icon: ScrollText },
+  { href: "/docs", label: "文档", icon: BookOpen },
   { href: "/settings", label: "设置", icon: Settings2 },
 ];
 
@@ -29,6 +31,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/stats": "统计",
   "/models": "模型",
   "/logs": "日志",
+  "/docs": "文档",
   "/settings": "设置",
 };
 

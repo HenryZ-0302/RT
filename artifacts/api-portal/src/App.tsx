@@ -5,6 +5,7 @@ import PageLogs from "./components/PageLogs";
 import { AppLayout } from "./layouts/AppLayout";
 import { ThemeProvider } from "./components/theme-provider";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DocsPage } from "./pages/DocsPage";
 import { HomePage } from "./pages/HomePage";
 import { StatsPage } from "./pages/StatsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -418,9 +419,11 @@ export default function App() {
             <Route path="/logs">
               <PageLogs baseUrl={baseUrl} apiKey={apiKey} />
             </Route>
+            <Route path="/docs">
+              <DocsPage displayUrl={displayUrl} />
+            </Route>
             <Route path="/settings">
               <HomePage 
-                displayUrl={displayUrl}
                 apiKey={apiKey}
                 sillyTavernMode={sillyTavernMode}
                 stLoading={stLoading}
