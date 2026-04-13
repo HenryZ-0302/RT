@@ -9,6 +9,7 @@ import {
   Moon,
   ChevronLeft,
   ChevronRight,
+  Settings2,
   Menu,
   X
 } from "lucide-react";
@@ -16,11 +17,20 @@ import { useTheme } from "../components/theme-provider";
 import { cn } from "../lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/", label: "统计", icon: BarChart2 },
+  { href: "/", label: "仪表盘", icon: LayoutDashboard },
+  { href: "/stats", label: "统计", icon: BarChart2 },
   { href: "/models", label: "模型", icon: Server },
   { href: "/logs", label: "日志", icon: ScrollText },
-  { href: "/settings", label: "设置", icon: LayoutDashboard },
+  { href: "/settings", label: "设置", icon: Settings2 },
 ];
+
+const PAGE_TITLES: Record<string, string> = {
+  "/": "仪表盘",
+  "/stats": "统计",
+  "/models": "模型",
+  "/logs": "日志",
+  "/settings": "设置",
+};
 
 export function AppLayout({ children, isSetup }: { children: React.ReactNode, isSetup?: boolean }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -117,8 +127,8 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
               </div>
            </div>
            
-           <div className="hidden md:block text-sm font-medium text-muted-foreground capitalize">
-             {location === '/' ? 'Stats' : location.slice(1)}
+           <div className="hidden md:block text-sm font-medium text-muted-foreground">
+             {PAGE_TITLES[location] ?? location.slice(1)}
            </div>
 
            <div className="flex items-center gap-4">

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { 
+import { useState } from "react";
+import {
   Copy, 
   Check, 
   GitMerge, 
@@ -8,19 +8,9 @@ import {
   Lightbulb, 
   KeyRound, 
   Zap,
-  Info,
-  HeartPulse
+  Info
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { servicePaths } from "../lib/service";
-import { FALLBACK_VERSION_INFO, type PortalVersionInfo } from "../lib/version";
-
-type HealthStatus = "checking" | "ok" | "error";
-type ServiceHealthSnapshot = {
-  apiServer: { status: HealthStatus; detail: string };
-  portal: { status: HealthStatus; detail: string };
-  checkedAt: string | null;
-};
 
 // Helper components
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
@@ -70,155 +60,16 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 }
 
 export function HomePage({
-  baseUrl, displayUrl, apiKey, sillyTavernMode, stLoading, onToggleSTMode,
+  displayUrl, apiKey, sillyTavernMode, stLoading, onToggleSTMode,
 }: {
-  baseUrl: string;
   displayUrl: string;
   apiKey: string;
   sillyTavernMode: boolean;
   stLoading: boolean;
   onToggleSTMode: () => void;
 }) {
-  const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
-  const [health, setHealth] = useState<ServiceHealthSnapshot>({
-    apiServer: { status: "checking", detail: "正在检测 API 服务..." },
-    portal: { status: "checking", detail: "正在检测门户前端..." },
-    checkedAt: null,
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadVersionInfo() {
-      try {
-        const response = await fetch(servicePaths.release(displayUrl));
-        if (!response.ok) return;
-        const data = await response.json() as PortalVersionInfo;
-        if (cancelled) return;
-        setVersionInfo({
-          version: data.version ?? FALLBACK_VERSION_INFO.version,
-          name: data.name ?? FALLBACK_VERSION_INFO.name,
-          releaseDate: data.releaseDate ?? FALLBACK_VERSION_INFO.releaseDate,
-          releaseNotes: data.releaseNotes ?? FALLBACK_VERSION_INFO.releaseNotes,
-        });
-      } catch {
-        // Keep the bundled fallback version info when the service is unavailable.
-      }
-    }
-
-    void loadVersionInfo();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [displayUrl]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function checkHealth() {
-      setHealth((prev) => ({
-        ...prev,
-        apiServer: { status: "checking", detail: "正在检测 API 服务..." },
-        portal: { status: "checking", detail: "正在检测门户前端..." },
-      }));
-
-      const [apiResult, portalResult] = await Promise.allSettled([
-        fetch(servicePaths.healthcheck(baseUrl), { cache: "no-store", signal: AbortSignal.timeout(5000) }),
-        fetch(`${window.location.origin}/?portal_health=${Date.now()}`, { cache: "no-store", signal: AbortSignal.timeout(5000) }),
-      ]);
-
-      if (cancelled) return;
-
-      const next: ServiceHealthSnapshot = {
-        apiServer: { status: "error", detail: "API 服务器无响应" },
-        portal: { status: "error", detail: "前端门户无响应" },
-        checkedAt: new Date().toLocaleTimeString(),
-      };
-
-      if (apiResult.status === "fulfilled" && apiResult.value.ok) {
-        const payload = await apiResult.value.json().catch(() => null) as { apiServer?: { uptimeSeconds?: number; version?: string } } | null;
-        next.apiServer = {
-          status: "ok",
-          detail: `运行正常${payload?.apiServer?.version ? ` · v${payload.apiServer.version}` : ""}${typeof payload?.apiServer?.uptimeSeconds === "number" ? ` · 已运行 ${payload.apiServer.uptimeSeconds}s` : ""}`,
-        };
-      } else if (apiResult.status === "fulfilled") {
-        next.apiServer = { status: "error", detail: `API 检测失败（HTTP ${apiResult.value.status}）` };
-      }
-
-      if (portalResult.status === "fulfilled" && portalResult.value.ok) {
-        next.portal = {
-          status: "ok",
-          detail: "前端门户可访问",
-        };
-      } else if (portalResult.status === "fulfilled") {
-        next.portal = { status: "error", detail: `前端检测失败（HTTP ${portalResult.value.status}）` };
-      }
-
-      setHealth(next);
-    }
-
-    void checkHealth();
-    const timer = window.setInterval(() => { void checkHealth(); }, 30000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [baseUrl]);
-
-  const statusBadge = (status: HealthStatus) => {
-    if (status === "ok") return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
-    if (status === "error") return "bg-destructive/10 text-destructive border-destructive/20";
-    return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
-  };
-
   return (
     <div className="space-y-6 max-w-5xl">
-      {/* Current release nodes */}
-      <Card className="bg-primary/5 border-primary/20 shadow-md shadow-primary/5">
-        <div className="flex items-center gap-2 mb-4 text-primary">
-          <Info size={18} />
-          <h2 className="text-sm font-bold tracking-widest uppercase">当前版本更新</h2>
-        </div>
-        
-        <div className="mb-4 relative">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="font-mono text-sm font-bold text-primary">v{versionInfo.version}</span>
-            <span className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">{versionInfo.releaseDate}</span>
-          </div>
-          <p className="text-sm text-muted-foreground leading-relaxed ml-1">
-            {versionInfo.releaseNotes}
-          </p>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center gap-2 mb-4 text-primary">
-          <HeartPulse size={18} />
-          <h2 className="text-sm font-bold tracking-widest uppercase">实时健康检查</h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            { label: "API 服务器", value: health.apiServer },
-            { label: "前端门户", value: health.portal },
-          ].map((item) => (
-            <div key={item.label} className="rounded-xl border border-border/60 bg-secondary/20 p-4">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <div className="font-semibold text-sm">{item.label}</div>
-                <span className={cn("text-[11px] px-2 py-1 rounded-full border font-medium", statusBadge(item.value.status))}>
-                  {item.value.status === "ok" ? "正常" : item.value.status === "error" ? "异常" : "检测中"}
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed m-0">{item.value.detail}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 text-xs text-muted-foreground">
-          {health.checkedAt ? `上次检测：${health.checkedAt}` : "正在初始化健康检查..."}
-        </div>
-      </Card>
-
       {/* Feature Cards Grid */}
       <div>
         <SectionTitle>核心功能</SectionTitle>

@@ -4,6 +4,7 @@ import SetupWizard from "./components/SetupWizard";
 import PageLogs from "./components/PageLogs";
 import { AppLayout } from "./layouts/AppLayout";
 import { ThemeProvider } from "./components/theme-provider";
+import { DashboardPage } from "./pages/DashboardPage";
 import { HomePage } from "./pages/HomePage";
 import { StatsPage } from "./pages/StatsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -386,6 +387,12 @@ export default function App() {
         <AppLayout>
           <Switch>
             <Route path="/">
+              <DashboardPage
+                baseUrl={baseUrl}
+                displayUrl={displayUrl}
+              />
+            </Route>
+            <Route path="/stats">
               <div className="space-y-6">
                 <StatsPage 
                   baseUrl={baseUrl} apiKey={apiKey}
@@ -413,7 +420,6 @@ export default function App() {
             </Route>
             <Route path="/settings">
               <HomePage 
-                baseUrl={baseUrl}
                 displayUrl={displayUrl}
                 apiKey={apiKey}
                 sillyTavernMode={sillyTavernMode}
