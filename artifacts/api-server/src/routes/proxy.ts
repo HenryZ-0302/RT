@@ -1459,6 +1459,7 @@ async function generateOpenAICompatibleImageResponse(
           ? err.status
           : 500;
       const message = err instanceof Error ? err.message : "Unknown error";
+      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
       pushRequestLog({
         method: req.method,
         path: req.path,
@@ -1572,6 +1573,7 @@ async function handleGeminiNativeImage(req: Request, res: Response) {
           ? err.status
           : 500;
       const message = err instanceof Error ? err.message : "Unknown error";
+      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
       pushRequestLog({
         method: req.method,
         path: req.path,
@@ -1658,6 +1660,7 @@ async function handleGeminiNativeGenerateContent(req: Request, res: Response) {
           ? err.status
           : 500;
       const message = err instanceof Error ? err.message : "Unknown error";
+      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
       pushRequestLog({
         method: req.method,
         path: req.path,
@@ -1745,6 +1748,7 @@ async function handleGeminiNativeStreamGenerateContent(req: Request, res: Respon
           ? err.status
           : 500;
       const message = err instanceof Error ? err.message : "Unknown error";
+      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
       pushRequestLog({
         method: req.method,
         path: req.path,
@@ -1827,6 +1831,7 @@ async function handleGeminiNativeCountTokens(req: Request, res: Response) {
           ? err.status
           : 500;
       const message = err instanceof Error ? err.message : "Unknown error";
+      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
       pushRequestLog({
         method: req.method,
         path: req.path,
@@ -2469,6 +2474,7 @@ function sendApiError(_req: Request, res: Response, err: unknown): void {
   const message = err instanceof Error ? err.message : "Unknown error";
   const alreadyLogged = !!(err as { __logged?: boolean } | null | undefined)?.__logged;
   if (!alreadyLogged) {
+    recordErrorStat("local");
     pushRequestLog({
       method: _req.method,
       path: _req.path,
