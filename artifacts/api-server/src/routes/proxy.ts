@@ -2149,8 +2149,11 @@ async function handleAnthropicMessages(req: Request, res: Response) {
   req.log.info({ model: selectedModel, actualModel, stream: shouldStream, thinking: effectiveThinking }, "Anthropic /v1/messages request");
 
   try {
+    // If the model alias implies thinking AND the client also sent an explicit
+    // thinking parameter, just log a note and let the client's value win
+    // (effectiveThinking already prefers the client-supplied value).
     if (thinkingEnabled && thinking) {
-      throw new HttpStatusError(400, `Model alias '${selectedModel}' already implies thinking mode. Remove the explicit thinking parameter or use '${actualModel}'.`);
+      req.log.info({ model: selectedModel, actualModel }, "Model alias implies thinking; client also sent explicit thinking param — using client value");
     }
     if (
       effectiveThinking
