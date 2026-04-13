@@ -1041,7 +1041,7 @@ async function buildGeminiImageContents(prompt: string, imageInputs: string[]): 
     parts.push(await imageInputToPart(input));
   }
   parts.push({ text: prompt });
-  return parts;
+  return [{ role: "user", parts }];
 }
 
 function extractGeneratedImages(response: {
