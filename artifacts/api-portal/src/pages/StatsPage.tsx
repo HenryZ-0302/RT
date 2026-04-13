@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   RotateCw,
@@ -167,24 +167,7 @@ export function StatsPage({
     ? chatModelEntries.reduce((sum, [model, ms]) => sum + (ms.completionTokens * getModelPrice(model).output) / 1_000_000, 0)
     : null;
 
-  const sortedChatModelEntries = chatModelEntries
-    .filter(([, ms]) => ms.calls > 0)
-    .map(([model, ms]) => ({
-      model,
-      calls: ms.calls,
-      cost: estimateModelCost(model, ms.promptTokens, ms.completionTokens),
-    }))
-    .sort((a, b) => b.cost - a.cost);
-
-  const sortedImageModelEntries = imageModelEntries
-    .filter(([, ms]) => ms.calls > 0)
-    .map(([model, ms]) => ({
-      model,
-      calls: ms.calls,
-    }))
-    .sort((a, b) => b.calls - a.calls);
-
-  const hasModelStats = sortedChatModelEntries.length > 0 || sortedImageModelEntries.length > 0;
+  const hasModelStats = chatModelEntries.some(([, ms]) => ms.calls > 0) || imageModelEntries.some(([, ms]) => ms.calls > 0);
 
   const groupedModelEntries = useMemo(() => {
     if (!modelStats) return [];
@@ -242,6 +225,11 @@ export function StatsPage({
     totalTtft: acc.totalTtft + ((s.avgTtftMs ?? 0) * (s.streamingCalls ?? 0)),
     totalStreamCalls: acc.totalStreamCalls + (s.streamingCalls ?? 0),
   }), { calls: 0, errors: 0, streamingCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, totalDuration: 0, totalTtft: 0, totalStreamCalls: 0 }) : null;
+
+  useEffect(() => {
+    if (!apiKey) return;
+    onRefresh();
+  }, [apiKey, onRefresh]);
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -309,7 +297,7 @@ export function StatsPage({
             <div className="flex items-center gap-2 text-emerald-500 mb-4 font-semibold text-sm">
               <Zap size={16} /> Token 用量
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <div className="text-xs text-muted-foreground mb-1">输入 (Prompt)</div>
                 <div className="text-2xl font-bold font-mono tracking-tight text-emerald-400">{fmt(totals!.promptTokens)}</div>
@@ -317,6 +305,10 @@ export function StatsPage({
               <div>
                 <div className="text-xs text-muted-foreground mb-1">输出 (Completion)</div>
                 <div className="text-2xl font-bold font-mono tracking-tight text-emerald-300">{fmt(totals!.completionTokens)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">总 Token</div>
+                <div className="text-2xl font-bold font-mono tracking-tight text-emerald-500">{fmt(totals!.totalTokens)}</div>
               </div>
             </div>
           </Card>
@@ -381,40 +373,12 @@ export function StatsPage({
                 </div>
               </div>
               <div className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded-md border border-border/50">
-                <div className="flex justify-between mb-1"><span>输入开销:</span> <span>${(totalModelInputCost !== null ? totalModelInputCost : ((totals!.promptTokens * DEFAULT_PRICING.input / 1_000_000))).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>输出开销:</span> <span>${(totalModelOutputCost !== null ? totalModelOutputCost : ((totals!.completionTokens * DEFAULT_PRICING.output / 1_000_000))).toFixed(2)}</span></div>
+                <div className="flex justify-between mb-1"><span>文本输入:</span> <span>${(totalModelInputCost ?? (totals!.promptTokens * DEFAULT_PRICING.input / 1_000_000)).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>文本输出:</span> <span>${(totalModelOutputCost ?? (totals!.completionTokens * DEFAULT_PRICING.output / 1_000_000)).toFixed(2)}</span></div>
                 <div className="flex justify-between mt-1"><span>图片请求:</span> <span>{imageModelEntries.reduce((sum, [, ms]) => sum + ms.calls, 0)}</span></div>
               </div>
             </div>
           </Card>
-
-            <Card className="flex flex-col border-purple-500/10 shadow-sm border-t-2 border-t-purple-500 lg:col-span-1">
-            <div className="flex items-center gap-2 text-purple-500 mb-4 font-semibold text-sm">
-              <Settings2 size={16} /> 按模型统计
-            </div>
-            {!modelStats || Object.keys(modelStats).length === 0 || !hasModelStats ? (
-              <div className="text-xs text-muted-foreground flex-1 flex items-center justify-center">暂无数据</div>
-            ) : (
-              <div className="flex flex-col gap-2 max-h-[140px] overflow-y-auto pr-1">
-                {sortedChatModelEntries.map(({ model, cost, calls }) => (
-                  <div key={model} className="flex justify-between items-center text-[11px] gap-3">
-                    <span className="text-muted-foreground font-mono truncate flex-1" title={model}>{model}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">文本</span>
-                    <span className="text-foreground shrink-0">{calls}次</span>
-                    <span className="text-amber-500 font-semibold shrink-0">${cost.toFixed(4)}</span>
-                  </div>
-                ))}
-                {sortedImageModelEntries.map(({ model, calls }) => (
-                  <div key={model} className="flex justify-between items-center text-[11px] gap-3">
-                    <span className="text-muted-foreground font-mono truncate flex-1" title={model}>{model}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 shrink-0">图片</span>
-                    <span className="text-foreground shrink-0">{calls}次</span>
-                    <span className="text-muted-foreground shrink-0">不计 token 开销</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            </Card>
           </div>
 
           <Card>

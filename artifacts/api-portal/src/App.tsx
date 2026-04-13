@@ -153,6 +153,11 @@ export default function App() {
     }
   }, [applyMetricsPayload, baseUrl]);
 
+  const refreshStats = useCallback(() => {
+    if (!apiKey) return;
+    void fetchStats(apiKey);
+  }, [apiKey, fetchStats]);
+
   const addBackend = async (e: React.FormEvent) => {
     e.preventDefault();
     const url = addUrl.trim().replace(/\/+$/, "");
@@ -397,7 +402,7 @@ export default function App() {
             <Route path="/stats">
               <StatsPage 
                 baseUrl={baseUrl} apiKey={apiKey}
-                stats={stats} statsError={statsError} onRefresh={() => fetchStats(apiKey)}
+                stats={stats} statsError={statsError} onRefresh={refreshStats}
                 addUrl={addUrl} setAddUrl={setAddUrl} addState={addState} addMsg={addMsg}
                 onAddBackend={addBackend} onRemoveBackend={removeBackend}
                 onToggleBackend={toggleBackend} onBatchToggle={batchToggleBackends}
