@@ -610,6 +610,20 @@ function sanitizeThinkingText(raw: string): string {
   return raw.replace(/<\/?think>/g, "");
 }
 
+function isTimeoutLikeError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return err instanceof DOMException
+    || /timeout|timed out|aborted|aborterror|und_err_connect_timeout/i.test(message);
+}
+
+function normalizeImageError(err: unknown, model: string): unknown {
+  if (err instanceof HttpStatusError) return err;
+  if (isTimeoutLikeError(err)) {
+    return new HttpStatusError(504, `Image generation timed out for '${model}'. Please retry in a moment.`);
+  }
+  return err;
+}
+
 function buildReasoningFields(reasoning: string): { reasoning: string; reasoning_content: string } {
   return {
     reasoning,
@@ -1074,51 +1088,55 @@ async function handleOpenAIImage({
   n?: number;
   size?: string;
 }): Promise<Record<string, unknown>> {
-  const { apiKey, baseURL } = getLocalOpenAIConfig();
-  const normalizedBaseURL = baseURL.replace(/\/+$/, "");
+  try {
+    const { apiKey, baseURL } = getLocalOpenAIConfig();
+    const normalizedBaseURL = baseURL.replace(/\/+$/, "");
 
-  if (imageInputs.length > 0) {
-    const form = new FormData();
-    form.set("model", model);
-    form.set("prompt", prompt);
-    if (typeof n === "number") form.set("n", String(Math.max(1, Math.min(4, Math.floor(n)))));
-    if (size) form.set("size", size);
-    for (let i = 0; i < imageInputs.length; i++) {
-      form.append("image", await imageInputToBlob(imageInputs[i]), `image-${i + 1}.png`);
+    if (imageInputs.length > 0) {
+      const form = new FormData();
+      form.set("model", model);
+      form.set("prompt", prompt);
+      if (typeof n === "number") form.set("n", String(Math.max(1, Math.min(4, Math.floor(n)))));
+      if (size) form.set("size", size);
+      for (let i = 0; i < imageInputs.length; i++) {
+        form.append("image", await imageInputToBlob(imageInputs[i]), `image-${i + 1}.png`);
+      }
+
+      const response = await fetch(`${normalizedBaseURL}/images/edits`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(180_000),
+      });
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "unknown");
+        throw new HttpStatusError(response.status, `OpenAI image edit failed: ${errText}`);
+      }
+      return await response.json() as Record<string, unknown>;
     }
 
-    const response = await fetch(`${normalizedBaseURL}/images/edits`, {
+    const response = await fetch(`${normalizedBaseURL}/images/generations`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        ...(typeof n === "number" ? { n: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
+        ...(size ? { size } : {}),
+      }),
       signal: AbortSignal.timeout(180_000),
     });
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown");
-      throw new HttpStatusError(response.status, `OpenAI image edit failed: ${errText}`);
+      throw new HttpStatusError(response.status, `OpenAI image generation failed: ${errText}`);
     }
     return await response.json() as Record<string, unknown>;
+  } catch (err) {
+    throw normalizeImageError(err, model);
   }
-
-  const response = await fetch(`${normalizedBaseURL}/images/generations`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      prompt,
-      ...(typeof n === "number" ? { n: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
-      ...(size ? { size } : {}),
-    }),
-    signal: AbortSignal.timeout(180_000),
-  });
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "unknown");
-    throw new HttpStatusError(response.status, `OpenAI image generation failed: ${errText}`);
-  }
-  return await response.json() as Record<string, unknown>;
 }
 
 // Convert OpenAI tools array → Anthropic tools array
@@ -1202,26 +1220,30 @@ async function handleGeminiImage({
   raw: Record<string, unknown>;
   images: Array<{ mimeType: string; b64_json: string }>;
 }> {
-  const client = makeLocalGemini();
-  const contents = nativeContents ?? await buildGeminiImageContents(prompt, imageInputs);
-  const sizeConfig = mapOpenAIImageSize(size);
-  const response = await client.models.generateContent({
-    model,
-    contents,
-    config: {
-      ...(nativeConfig ?? {}),
-      ...(sizeConfig.aspectRatio ? { aspectRatio: sizeConfig.aspectRatio } : {}),
-      ...(typeof n === "number" ? { numberOfImages: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
-    },
-  });
-  const raw = response as unknown as Record<string, unknown>;
-  const images = extractGeneratedImages(raw as {
-    candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }>;
-  });
-  if (images.length === 0) {
-    throw new HttpStatusError(502, `Image model '${model}' returned no image output.`);
+  try {
+    const client = makeLocalGemini();
+    const contents = nativeContents ?? await buildGeminiImageContents(prompt, imageInputs);
+    const sizeConfig = mapOpenAIImageSize(size);
+    const response = await client.models.generateContent({
+      model,
+      contents,
+      config: {
+        ...(nativeConfig ?? {}),
+        ...(sizeConfig.aspectRatio ? { aspectRatio: sizeConfig.aspectRatio } : {}),
+        ...(typeof n === "number" ? { numberOfImages: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
+      },
+    });
+    const raw = response as unknown as Record<string, unknown>;
+    const images = extractGeneratedImages(raw as {
+      candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }>;
+    });
+    if (images.length === 0) {
+      throw new HttpStatusError(502, `Image model '${model}' returned no image output.`);
+    }
+    return { raw, images };
+  } catch (err) {
+    throw normalizeImageError(err, model);
   }
-  return { raw, images };
 }
 
 async function handleFriendJsonProxy({

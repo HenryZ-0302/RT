@@ -46,6 +46,15 @@ interface VersionInfo {
   releaseNotes?: string;
 }
 
+function sendUpdateError(
+  res: Response,
+  status: number,
+  message: string,
+  type: "server_error" | "invalid_request_error" | "conflict_error" = "server_error",
+): void {
+  res.status(status).json({ error: { message, type } });
+}
+
 function readLocalVersion(): VersionInfo {
   const candidates = [
     resolve(process.cwd(), "version.json"),
@@ -92,7 +101,7 @@ function isNewer(remote: string, local: string): boolean {
 function checkApiKey(req: Request, res: Response): boolean {
   const serviceKey = getServiceAccessKey();
   if (!serviceKey) {
-    res.status(500).json({ error: "Service access key is not configured" });
+    sendUpdateError(res, 500, "Service access key is not configured", "server_error");
     return false;
   }
 
@@ -104,7 +113,7 @@ function checkApiKey(req: Request, res: Response): boolean {
   else if (typeof xApiKey === "string") provided = xApiKey;
 
   if (!provided || provided !== serviceKey) {
-    res.status(401).json({ error: "Unauthorized" });
+    sendUpdateError(res, 401, "Unauthorized", "invalid_request_error");
     return false;
   }
 
@@ -291,7 +300,7 @@ function sendBundle(_req: Request, res: Response) {
       files,
     });
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : "bundle failed" });
+    sendUpdateError(res, 500, error instanceof Error ? error.message : "bundle failed", "server_error");
   }
 }
 
@@ -300,7 +309,7 @@ let updateInProgress = false;
 async function applyUpdate(req: Request, res: Response) {
   if (!checkApiKey(req, res)) return;
   if (updateInProgress) {
-    res.status(409).json({ error: "Update already in progress, please wait" });
+    sendUpdateError(res, 409, "Update already in progress, please wait", "conflict_error");
     return;
   }
 
