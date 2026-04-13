@@ -203,6 +203,11 @@ export function ModelsPage({
 
   const modelMetaMap = new Map(modelStatus.map((m) => [m.id, m]));
 
+  const handleToggleGroup = (group: string, enabled: boolean) => {
+    if (!enabled && !window.confirm("确认要关闭这一整组模型吗？关闭后客户端将无法发现和调用它们。")) return;
+    onToggleProvider(group, enabled);
+  };
+
   const testModel = async (modelId: string) => {
     if (checkingId) return;
     setCheckingId(modelId);
@@ -400,11 +405,11 @@ export function ModelsPage({
                   
                   <div className="flex gap-1.5 ml-auto md:ml-0">
                     <button 
-                      onClick={() => onToggleProvider(key, true)} 
+                      onClick={() => handleToggleGroup(key, true)} 
                       className="px-2 py-1 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 rounded transition-colors text-xs font-medium"
                     >全开</button>
                     <button 
-                      onClick={() => onToggleProvider(key, false)} 
+                      onClick={() => handleToggleGroup(key, false)} 
                       className="px-2 py-1 bg-amber-500/10 text-amber-600 border border-amber-500/20 hover:bg-amber-500/20 rounded transition-colors text-xs font-medium"
                     >全关</button>
                   </div>
@@ -413,7 +418,7 @@ export function ModelsPage({
                   
                   <div className="flex items-center gap-2">
                      <Power size={14} className={groupEnabled ? "text-primary" : "text-muted-foreground"} />
-                     <ModelToggle enabled={groupEnabled} onChange={() => onToggleProvider(key, !allEnabled)} />
+                     <ModelToggle enabled={groupEnabled} onChange={() => handleToggleGroup(key, !allEnabled)} />
                   </div>
                   
                   {!searchQuery && (

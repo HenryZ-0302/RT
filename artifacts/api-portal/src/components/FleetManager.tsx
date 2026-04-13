@@ -67,7 +67,12 @@ export function FleetManager() {
     setAddName(""); setAddUrl(""); setAddKey("");
   };
 
-  const removeInst = (id: string) => persist(instances.filter((i) => i.id !== id));
+  const removeInst = (id: string) => {
+    const target = instances.find((i) => i.id === id);
+    if (!target) return;
+    if (!window.confirm(`确认要删除实例 ${target.name} 吗？`)) return;
+    persist(instances.filter((i) => i.id !== id));
+  };
 
   const patchInst = (id: string, patch: Partial<FleetInstance>) => {
     const next = instances.map((i) => i.id === id ? { ...i, ...patch } : i);

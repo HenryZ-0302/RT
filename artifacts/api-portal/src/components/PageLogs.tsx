@@ -179,6 +179,11 @@ export default function PageLogs({ baseUrl, apiKey }: { baseUrl: string; apiKey:
     URL.revokeObjectURL(url);
   };
 
+  const clearLogs = () => {
+    if (!window.confirm("确认要清空当前日志面板吗？这只会清空当前页面显示的日志。")) return;
+    setLogs([]);
+  };
+
   if (!apiKey) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-center border-dashed border-2 border-border/50 rounded-xl bg-card/50 min-h-[400px]">
@@ -247,9 +252,9 @@ export default function PageLogs({ baseUrl, apiKey }: { baseUrl: string; apiKey:
              <Download size={12} /> 下载 Logs
           </button>
           <button 
-             onClick={() => setLogs([])} 
+             onClick={clearLogs} 
              className="text-xs flex items-center gap-1.5 px-3 py-1.5 bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/20 rounded shadow-sm transition-colors"
-          >
+           >
              <Trash2 size={12} /> 清空面板
           </button>
         </div>
@@ -274,7 +279,7 @@ export default function PageLogs({ baseUrl, apiKey }: { baseUrl: string; apiKey:
         {/* Logs Output */}
         <div 
           ref={scrollRef}
-          className="absolute inset-0 top-0 pt-4 pb-4 overflow-y-auto px-4 !font-mono text-[12px] leading-relaxed subpixel-antialiased"
+          className="absolute inset-x-0 bottom-0 top-8 pt-4 pb-4 overflow-y-auto px-4 !font-mono text-[12px] leading-relaxed subpixel-antialiased"
         >
           {filtered.length === 0 && (
              <div className="flex flex-col items-center justify-center h-full text-zinc-600 gap-3">

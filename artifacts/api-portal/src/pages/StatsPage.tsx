@@ -70,6 +70,7 @@ export function StatsPage({
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
 
   const resetStats = () => {
+    if (!window.confirm("确认要重置全部统计数据吗？此操作会清空当前累计统计。")) return;
     setResetting(true);
     fetch(`${baseUrl}/api/service/metrics/reset`, {
       method: "POST",

@@ -96,6 +96,11 @@ export function NodesPage({
     });
   };
 
+  const confirmRemoveNode = (label: string) => {
+    if (!window.confirm(`确认要移除子节点 ${label} 吗？`)) return false;
+    return true;
+  };
+
   const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString();
 
   const allNodes = stats ? Object.entries(stats) : [];
@@ -265,7 +270,13 @@ export function NodesPage({
                       <button onClick={() => { onBatchToggle([...selected], true); setSelected(new Set()); }} className="text-xs px-3 py-1.5 rounded bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 transition-colors border border-emerald-500/20">启用</button>
                       <button onClick={() => { onBatchToggle([...selected], false); setSelected(new Set()); }} className="text-xs px-3 py-1.5 rounded bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 transition-colors border border-amber-500/20">禁用</button>
                       {[...selected].some((label) => dynamicNodes.find(([dynamicLabel]) => dynamicLabel === label)) && (
-                        <button onClick={() => { onBatchRemove([...selected].filter((label) => dynamicNodes.find(([dynamicLabel]) => dynamicLabel === label))); setSelected(new Set()); }} className="text-xs px-3 py-1.5 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors border border-destructive/20">移除动态节点</button>
+                        <button onClick={() => {
+                          const removable = [...selected].filter((label) => dynamicNodes.find(([dynamicLabel]) => dynamicLabel === label));
+                          if (!removable.length) return;
+                          if (!window.confirm(`确认要移除这 ${removable.length} 个动态子节点吗？`)) return;
+                          onBatchRemove(removable);
+                          setSelected(new Set());
+                        }} className="text-xs px-3 py-1.5 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors border border-destructive/20">移除动态节点</button>
                       )}
                     </div>
                   )}
@@ -330,7 +341,11 @@ export function NodesPage({
                           </button>
                           {value.dynamic && (
                             <button
-                              onClick={(event) => { event.stopPropagation(); onRemoveBackend(label); }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (!confirmRemoveNode(label)) return;
+                                onRemoveBackend(label);
+                              }}
                               className="p-1.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-colors"
                             >
                               <Trash2 size={13} />
