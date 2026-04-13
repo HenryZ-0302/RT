@@ -23,6 +23,9 @@ export const servicePaths = {
   healthcheck(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/healthcheck`;
   },
+  healthHistory(baseUrl: string): string {
+    return `${serviceBase(baseUrl)}/healthcheck/history`;
+  },
   bootstrap(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/bootstrap`;
   },
