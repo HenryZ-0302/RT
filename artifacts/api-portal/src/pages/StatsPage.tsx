@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Activity,
   RotateCw,
@@ -7,6 +7,7 @@ import {
   DollarSign,
   CheckCircle,
   Settings2,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -86,6 +87,23 @@ function estimateModelCost(model: string, prompt: number, completion: number): n
   return (prompt * p.input + completion * p.output) / 1_000_000;
 }
 
+function inferProvider(model: string): string {
+  const normalized = model.toLowerCase();
+  if (normalized.startsWith("gpt") || normalized.startsWith("o1") || normalized.startsWith("o3") || normalized.startsWith("o4")) return "OpenAI";
+  if (normalized.startsWith("claude")) return "Anthropic";
+  if (normalized.startsWith("gemini")) return "Google";
+  if (normalized.startsWith("grok")) return "xAI";
+  if (normalized.startsWith("deepseek")) return "DeepSeek";
+  if (normalized.startsWith("llama")) return "Meta";
+  if (normalized.startsWith("mistral")) return "Mistral";
+  if (normalized.startsWith("qwen")) return "Qwen";
+  if (normalized.startsWith("command")) return "Cohere";
+  if (normalized.startsWith("nova")) return "Amazon";
+  if (normalized.startsWith("ernie")) return "Baidu";
+  if (normalized.includes("/")) return normalized.split("/")[0];
+  return "Other";
+}
+
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("bg-card text-card-foreground rounded-xl border border-border/50 shadow-sm p-5", className)}>
@@ -116,6 +134,7 @@ export function StatsPage({
   modelStats: Record<string, ModelStat> | null;
 }) {
   const [resetting, setResetting] = useState(false);
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
 
   const resetStats = () => {
     setResetting(true);
@@ -166,6 +185,47 @@ export function StatsPage({
     .sort((a, b) => b.calls - a.calls);
 
   const hasModelStats = sortedChatModelEntries.length > 0 || sortedImageModelEntries.length > 0;
+
+  const groupedModelEntries = useMemo(() => {
+    if (!modelStats) return [];
+
+    const allEntries = Object.entries(modelStats)
+      .filter(([, ms]) => ms.calls > 0)
+      .map(([model, ms]) => {
+        const capability = ms.capability ?? "chat";
+        return {
+          model,
+          provider: inferProvider(model),
+          capability,
+          calls: ms.calls,
+          promptTokens: ms.promptTokens,
+          completionTokens: ms.completionTokens,
+          totalTokens: ms.promptTokens + ms.completionTokens,
+          cost: capability === "image" ? null : estimateModelCost(model, ms.promptTokens, ms.completionTokens),
+        };
+      });
+
+    const grouped = new Map<string, typeof allEntries>();
+    for (const entry of allEntries) {
+      const items = grouped.get(entry.provider) ?? [];
+      items.push(entry);
+      grouped.set(entry.provider, items);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([provider, items]) => ({
+        provider,
+        items: items.sort((a, b) => {
+          if (a.capability !== b.capability) return a.capability === "chat" ? -1 : 1;
+          return b.calls - a.calls;
+        }),
+      }))
+      .sort((a, b) => b.items.reduce((sum, item) => sum + item.calls, 0) - a.items.reduce((sum, item) => sum + item.calls, 0));
+  }, [modelStats]);
+
+  const toggleProvider = (provider: string) => {
+    setExpandedProviders((prev) => ({ ...prev, [provider]: !prev[provider] }));
+  };
 
   const estimateCostFallback = (prompt: number, completion: number) => {
     return (prompt * DEFAULT_PRICING.input + completion * DEFAULT_PRICING.output) / 1_000_000;
@@ -227,8 +287,9 @@ export function StatsPage({
       ) : !stats ? (
         <Card><div className="flex justify-center py-6"><Activity size={24} className="animate-pulse text-muted-foreground" /></div></Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <Card className="flex flex-col border-indigo-500/10 shadow-sm border-t-2 border-t-indigo-500">
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card className="flex flex-col border-indigo-500/10 shadow-sm border-t-2 border-t-indigo-500">
             <div className="flex items-center gap-2 text-indigo-500 mb-4 font-semibold text-sm">
               <Activity size={16} /> 使用统计
             </div>
@@ -244,7 +305,7 @@ export function StatsPage({
             </div>
           </Card>
 
-          <Card className="flex flex-col border-emerald-500/10 shadow-sm border-t-2 border-t-emerald-500">
+            <Card className="flex flex-col border-emerald-500/10 shadow-sm border-t-2 border-t-emerald-500">
             <div className="flex items-center gap-2 text-emerald-500 mb-4 font-semibold text-sm">
               <Zap size={16} /> Token 用量
             </div>
@@ -260,7 +321,7 @@ export function StatsPage({
             </div>
           </Card>
 
-          <Card className="flex flex-col border-blue-500/10 shadow-sm border-t-2 border-t-blue-500">
+            <Card className="flex flex-col border-blue-500/10 shadow-sm border-t-2 border-t-blue-500">
             <div className="flex items-center gap-2 text-blue-500 mb-4 font-semibold text-sm">
               <CheckCircle size={16} /> 成功率
             </div>
@@ -289,7 +350,7 @@ export function StatsPage({
             </div>
           </Card>
 
-          <Card className="flex flex-col border-rose-500/10 shadow-sm border-t-2 border-t-rose-500 lg:col-span-1">
+            <Card className="flex flex-col border-rose-500/10 shadow-sm border-t-2 border-t-rose-500 lg:col-span-1">
             <div className="flex items-center gap-2 text-rose-500 mb-4 font-semibold text-sm">
               <Zap size={16} /> 性能指标
             </div>
@@ -309,7 +370,7 @@ export function StatsPage({
             </div>
           </Card>
 
-          <Card className="flex flex-col border-amber-500/10 shadow-sm border-t-2 border-t-amber-500 lg:col-span-1">
+            <Card className="flex flex-col border-amber-500/10 shadow-sm border-t-2 border-t-amber-500 lg:col-span-1">
             <div className="flex items-center gap-2 text-amber-500 mb-4 font-semibold text-sm">
               <DollarSign size={16} /> 预估开销
             </div>
@@ -327,7 +388,7 @@ export function StatsPage({
             </div>
           </Card>
 
-          <Card className="flex flex-col border-purple-500/10 shadow-sm border-t-2 border-t-purple-500 lg:col-span-1">
+            <Card className="flex flex-col border-purple-500/10 shadow-sm border-t-2 border-t-purple-500 lg:col-span-1">
             <div className="flex items-center gap-2 text-purple-500 mb-4 font-semibold text-sm">
               <Settings2 size={16} /> 按模型统计
             </div>
@@ -353,8 +414,92 @@ export function StatsPage({
                 ))}
               </div>
             )}
+            </Card>
+          </div>
+
+          <Card>
+            <div className="flex items-center gap-2 mb-4 text-primary">
+              <Settings2 size={18} />
+              <h2 className="text-sm font-bold tracking-widest uppercase">模型明细</h2>
+            </div>
+
+            {!groupedModelEntries.length ? (
+              <div className="text-sm text-muted-foreground">暂无模型调用数据。</div>
+            ) : (
+              <div className="space-y-3">
+                {groupedModelEntries.map((group) => {
+                  const totalCalls = group.items.reduce((sum, item) => sum + item.calls, 0);
+                  const totalCost = group.items.reduce((sum, item) => sum + (item.cost ?? 0), 0);
+                  const isOpen = !!expandedProviders[group.provider];
+
+                  return (
+                    <div key={group.provider} className="rounded-xl border border-border/50 bg-background/50 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleProvider(group.provider)}
+                        className="w-full flex items-center justify-between gap-4 px-4 py-3 text-left hover:bg-secondary/40 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <ChevronRight size={16} className={cn("text-muted-foreground transition-transform", isOpen && "rotate-90")} />
+                          <div>
+                            <div className="font-semibold text-sm">{group.provider}</div>
+                            <div className="text-xs text-muted-foreground">{group.items.length} 个模型</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
+                          <span>{totalCalls} 次调用</span>
+                          <span>${totalCost.toFixed(4)}</span>
+                        </div>
+                      </button>
+
+                      {isOpen && (
+                        <div className="border-t border-border/50 divide-y divide-border/40">
+                          {group.items.map((item) => (
+                            <div key={item.model} className="px-4 py-3 bg-card/40">
+                              <div className="flex items-center justify-between gap-4 mb-2">
+                                <div className="font-mono text-sm text-foreground break-all">{item.model}</div>
+                                <span className={cn(
+                                  "text-[10px] px-2 py-1 rounded-full border shrink-0",
+                                  item.capability === "image"
+                                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20"
+                                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                                )}>
+                                  {item.capability === "image" ? "图片" : "文本"}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                                <div>
+                                  <div className="text-muted-foreground mb-1">调用次数</div>
+                                  <div className="font-semibold text-foreground">{item.calls}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground mb-1">输入 Token</div>
+                                  <div className="font-semibold text-foreground">{fmt(item.promptTokens)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground mb-1">输出 Token</div>
+                                  <div className="font-semibold text-foreground">{fmt(item.completionTokens)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground mb-1">总 Token</div>
+                                  <div className="font-semibold text-foreground">{fmt(item.totalTokens)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground mb-1">预估开销</div>
+                                  <div className="font-semibold text-foreground">{item.cost === null ? "不计 token 开销" : `$${item.cost.toFixed(4)}`}</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
-        </div>
+        </>
       )}
     </div>
   );
