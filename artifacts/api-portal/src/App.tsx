@@ -7,9 +7,9 @@ import { ThemeProvider } from "./components/theme-provider";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocsPage } from "./pages/DocsPage";
 import { HomePage } from "./pages/HomePage";
+import { NodesPage } from "./pages/NodesPage";
 import { StatsPage } from "./pages/StatsPage";
 import { ModelsPage } from "./pages/ModelsPage";
-import { FleetManager } from "./components/FleetManager";
 import { getStoredServiceKey, servicePaths, storeServiceKey } from "./lib/service";
 
 // Define the types that App needs for State management
@@ -395,18 +395,32 @@ export default function App() {
               />
             </Route>
             <Route path="/stats">
-              <div className="space-y-6">
-                <StatsPage 
-                  baseUrl={baseUrl} apiKey={apiKey}
-                  stats={stats} statsError={statsError} onRefresh={() => fetchStats(apiKey)}
-                  addUrl={addUrl} setAddUrl={setAddUrl} addState={addState} addMsg={addMsg}
-                  onAddBackend={addBackend} onRemoveBackend={removeBackend}
-                  onToggleBackend={toggleBackend} onBatchToggle={batchToggleBackends}
-                  onBatchRemove={batchRemoveBackends} routing={routing}
-                  onToggleRouting={toggleRouting} modelStats={modelStats}
-                />
-                <FleetManager />
-              </div>
+              <StatsPage 
+                baseUrl={baseUrl} apiKey={apiKey}
+                stats={stats} statsError={statsError} onRefresh={() => fetchStats(apiKey)}
+                addUrl={addUrl} setAddUrl={setAddUrl} addState={addState} addMsg={addMsg}
+                onAddBackend={addBackend} onRemoveBackend={removeBackend}
+                onToggleBackend={toggleBackend} onBatchToggle={batchToggleBackends}
+                onBatchRemove={batchRemoveBackends} routing={routing}
+                onToggleRouting={toggleRouting} modelStats={modelStats}
+              />
+            </Route>
+            <Route path="/nodes">
+              <NodesPage
+                apiKey={apiKey}
+                stats={stats}
+                addUrl={addUrl}
+                setAddUrl={setAddUrl}
+                addState={addState}
+                addMsg={addMsg}
+                onAddBackend={addBackend}
+                onRemoveBackend={removeBackend}
+                onToggleBackend={toggleBackend}
+                onBatchToggle={batchToggleBackends}
+                onBatchRemove={batchRemoveBackends}
+                routing={routing}
+                onToggleRouting={toggleRouting}
+              />
             </Route>
             <Route path="/models">
               <ModelsPage 
