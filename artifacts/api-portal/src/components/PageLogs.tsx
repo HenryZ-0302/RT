@@ -303,40 +303,49 @@ export default function PageLogs({ baseUrl, apiKey }: { baseUrl: string; apiKey:
           )}
 
           {filtered.map((log) => (
-             <div key={log.id} className="flex gap-4 py-1.5 border-b border-zinc-800/50 hover:bg-zinc-800/30 px-2 -mx-2 rounded transition-colors group/row">
-               <span className="text-zinc-500 flex-shrink-0 select-none w-20">{log.time.slice(11, 19)}</span>
-               
-               <div className="w-16 flex-shrink-0">
-                  <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider", 
-                    log.level === 'info' && "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
-                    log.level === 'warn' && "bg-amber-500/10 text-amber-400 border border-amber-500/20",
-                    log.level === 'error' && "bg-red-500/10 text-red-400 border border-red-500/20"
-                  )}>
-                    {log.level}
-                  </span>
-               </div>
-               
-               <span className="text-zinc-400 w-16 flex-shrink-0 font-medium">{log.method}</span>
-               
-               <span className="text-zinc-300 flex-1 truncate" title={log.path}>
-                 {log.path}
-               </span>
-               
-               <div className="flex items-center gap-4 flex-shrink-0 justify-end w-64">
-                 {log.model ? (
-                   <span className="text-indigo-400 truncate max-w-[120px]" title={log.model}>{log.model}</span>
-                 ) : (
-                   <span className="w-[120px]" />
-                 )}
+             <div key={log.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 px-2 -mx-2 rounded transition-colors group/row">
+               <div className="flex gap-4 py-1.5">
+                 <span className="text-zinc-500 flex-shrink-0 select-none w-20">{log.time.slice(11, 19)}</span>
                  
-                 <span className={cn("w-10 text-right shrink-0", STATUS_COLOR_TEXT(log.status))}>{log.status}</span>
+                 <div className="w-16 flex-shrink-0">
+                    <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider", 
+                      log.level === 'info' && "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
+                      log.level === 'warn' && "bg-amber-500/10 text-amber-400 border border-amber-500/20",
+                      log.level === 'error' && "bg-red-500/10 text-red-400 border border-red-500/20"
+                    )}>
+                      {log.level}
+                    </span>
+                 </div>
                  
-                 <span className="text-zinc-500 w-14 text-right shrink-0">{log.duration}ms</span>
+                 <span className="text-zinc-400 w-16 flex-shrink-0 font-medium">{log.method}</span>
                  
-                 <div className="w-8 flex justify-end shrink-0">
-                    {log.stream && <span className="text-[9px] font-bold text-violet-400 border border-violet-400/30 bg-violet-400/10 px-1 rounded">SSE</span>}
+                 <span className="text-zinc-300 flex-1 truncate" title={log.path}>
+                   {log.path}
+                 </span>
+                 
+                 <div className="flex items-center gap-4 flex-shrink-0 justify-end w-64">
+                   {log.model ? (
+                     <span className="text-indigo-400 truncate max-w-[120px]" title={log.model}>{log.model}</span>
+                   ) : (
+                     <span className="w-[120px]" />
+                   )}
+                   
+                   <span className={cn("w-10 text-right shrink-0", STATUS_COLOR_TEXT(log.status))}>{log.status}</span>
+                   
+                   <span className="text-zinc-500 w-14 text-right shrink-0">{log.duration}ms</span>
+                   
+                   <div className="w-8 flex justify-end shrink-0">
+                      {log.stream && <span className="text-[9px] font-bold text-violet-400 border border-violet-400/30 bg-violet-400/10 px-1 rounded">SSE</span>}
+                   </div>
                  </div>
                </div>
+
+               {log.error && (
+                 <div className="pb-2 pl-[8.5rem] pr-2 text-[11px] leading-relaxed text-red-300/90 break-words">
+                   <span className="text-red-400 font-semibold mr-2">错误:</span>
+                   {log.error}
+                 </div>
+               )}
              </div>
           ))}
         </div>
