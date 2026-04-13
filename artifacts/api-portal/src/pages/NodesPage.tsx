@@ -95,6 +95,7 @@ export function NodesPage({
   const dynamicNodes = allSubNodes.filter(([, value]) => value.dynamic);
   const allSelected = allSubNodes.length > 0 && allSubNodes.every(([label]) => selected.has(label));
   const someSelected = selected.size > 0;
+  const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({});
 
   const toggleSelect = (label: string) =>
     setSelected((prev) => {
@@ -106,6 +107,11 @@ export function NodesPage({
 
   const toggleSelectAll = () =>
     setSelected(allSelected ? new Set() : new Set(allSubNodes.map(([label]) => label)));
+
+  const toggleExpanded = (label: string) =>
+    setExpandedNodes((prev) => ({ ...prev, [label]: !prev[label] }));
+
+  const localNode = allNodes.find(([label]) => label === "local") ?? null;
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -121,13 +127,116 @@ export function NodesPage({
       ) : (
         <>
           <div>
-            <SectionTitle>节点统计与管理</SectionTitle>
+            <SectionTitle>主节点</SectionTitle>
 
-            {allNodes.length === 0 ? (
+            {localNode ? (
+              (() => {
+                const [, value] = localNode;
+                const isEnabled = value.enabled !== false;
+                const isHealthy = value.health === "healthy";
+                const expanded = !!expandedNodes.local;
+                const successCalls = Math.max(0, value.calls - value.errors);
+
+                return (
+                  <div className="rounded-xl border border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.05)] bg-indigo-500/5 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => toggleExpanded("local")}
+                      className="w-full p-4 text-left"
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center gap-4">
+                        <div className="flex items-center gap-3 w-full md:w-auto">
+                          <div className={cn("w-2 h-2 rounded-full flex-shrink-0", !isEnabled ? "bg-muted-foreground" : isHealthy ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" : "bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]")} />
+                          <div className="flex items-center gap-2 overflow-hidden flex-1 md:w-48">
+                            <span className="font-mono font-bold text-sm truncate text-indigo-500">当前节点</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex-shrink-0">本地进程</span>
+                          </div>
+                        </div>
+
+                        <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-[150px]" title={value.url ?? window.location.origin}>
+                          {value.url ?? window.location.origin}
+                        </span>
+
+                        <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
+                          <button
+                            type="button"
+                            onClick={(event) => { event.stopPropagation(); onToggleBackend("local", !isEnabled); }}
+                            className={cn(
+                              "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                              isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20",
+                            )}
+                          >
+                            {isEnabled ? "禁用" : "启用"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="px-1 pt-4 grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-3 items-center">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">请求</span>
+                          <span className="text-sm font-mono font-medium text-indigo-500 dark:text-indigo-400">{value.calls}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">成功</span>
+                          <span className="text-sm font-mono font-medium text-green-500 dark:text-green-400">{successCalls}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">失败</span>
+                          <span className={cn("text-sm font-mono font-medium", value.errors > 0 ? "text-destructive" : "text-green-500 dark:text-green-400")}>{value.errors}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">总 Token</span>
+                          <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.totalTokens)}</span>
+                        </div>
+                      </div>
+                    </button>
+
+                    {expanded && (
+                      <div className="px-5 py-4 border-t border-border/40 bg-secondary/10 grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-3 items-center">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">流式</span>
+                          <span className="text-sm font-mono font-medium text-blue-500 dark:text-blue-400">{value.streamingCalls ?? 0}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输入 Token</span>
+                          <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.promptTokens)}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输出 Token</span>
+                          <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.completionTokens)}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">均耗时</span>
+                          <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.calls > 0 ? `${value.avgDurationMs}ms` : "--"}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">首 Token</span>
+                          <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.avgTtftMs ? `${value.avgTtftMs}ms` : "--"}</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">开销</span>
+                          <span className="text-sm font-mono font-medium text-amber-500 dark:text-amber-400">${((value.promptTokens * DEFAULT_PRICING.input + value.completionTokens * DEFAULT_PRICING.output) / 1_000_000).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            ) : (
+              <Card>
+                <p className="text-sm text-muted-foreground m-0">当前节点信息暂不可用。</p>
+              </Card>
+            )}
+          </div>
+
+          <div>
+            <SectionTitle>子节点</SectionTitle>
+
+            {allSubNodes.length === 0 ? (
               <Card className="py-12 border-dashed bg-transparent shadow-none border-border">
                 <div className="flex flex-col items-center justify-center text-center">
                   <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center text-muted-foreground mb-3"><Server size={24} /></div>
-                  <h3 className="font-semibold text-foreground mb-1">暂无额外节点</h3>
+                  <h3 className="font-semibold text-foreground mb-1">暂未添加子节点</h3>
                   <p className="text-sm text-muted-foreground max-w-sm mb-4">通过输入其他部署 URL，即可挂载节点实现自动负载均衡。</p>
                 </div>
               </Card>
@@ -153,36 +262,31 @@ export function NodesPage({
                   )}
                 </div>
 
-                {allNodes.map(([label, value]) => {
+                {allSubNodes.map(([label, value]) => {
                   const isEnabled = value.enabled !== false;
                   const isChecked = selected.has(label);
                   const isHealthy = value.health === "healthy";
-                  const isLocal = label === "local";
+                  const expanded = !!expandedNodes[label];
+                  const successCalls = Math.max(0, value.calls - value.errors);
 
                   return (
                     <div
                       key={label}
-                      onClick={() => !isLocal && toggleSelect(label)}
+                      onClick={() => toggleSelect(label)}
                       className={cn(
                         "group relative bg-card border rounded-xl overflow-hidden transition-all duration-200 shadow-sm flex flex-col",
-                        isLocal ? "border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.05)] bg-indigo-500/5 cursor-default" : "cursor-pointer",
+                        "cursor-pointer",
                         isChecked ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "hover:border-border/80 border-border/60",
                         !isEnabled && "opacity-60 bg-muted/30 hover:bg-muted/50",
                       )}
                     >
                       <div className="p-4 pb-3 flex flex-col md:flex-row md:items-center gap-4">
                         <div className="flex items-center gap-3 w-full md:w-auto">
-                          {!isLocal ? (
-                            <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(label)} onClick={(event) => event.stopPropagation()} className="w-4 h-4 rounded text-primary focus:ring-primary/20 cursor-pointer" />
-                          ) : (
-                            <div className="w-4 h-4" />
-                          )}
+                          <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(label)} onClick={(event) => event.stopPropagation()} className="w-4 h-4 rounded text-primary focus:ring-primary/20 cursor-pointer" />
                           <div className={cn("w-2 h-2 rounded-full flex-shrink-0 animate-in zoom-in", !isEnabled ? "bg-muted-foreground" : isHealthy ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" : "bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]")} />
                           <div className="flex items-center gap-2 overflow-hidden flex-1 md:w-48">
-                            <span className={cn("font-mono font-bold text-sm truncate", isLocal && "text-indigo-500")}>{label}</span>
-                            {isLocal ? (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex-shrink-0">本地进程</span>
-                            ) : value.dynamic ? (
+                            <span className="font-mono font-bold text-sm truncate">{label}</span>
+                            {value.dynamic ? (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex-shrink-0">动态</span>
                             ) : (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex-shrink-0">ENV</span>
@@ -193,18 +297,22 @@ export function NodesPage({
                         <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-[150px]" title={value.url}>{value.url ?? label}</span>
 
                         <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
-                          {!isLocal && (
-                            <button
-                              onClick={(event) => { event.stopPropagation(); onToggleBackend(label, !isEnabled); }}
-                              className={cn(
-                                "px-2.5 py-1 text-xs rounded-md border transition-colors",
-                                isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20",
-                              )}
-                            >
-                              {isEnabled ? "禁用" : "启用"}
-                            </button>
-                          )}
-                          {value.dynamic && !isLocal && (
+                          <button
+                            onClick={(event) => { event.stopPropagation(); onToggleBackend(label, !isEnabled); }}
+                            className={cn(
+                              "px-2.5 py-1 text-xs rounded-md border transition-colors",
+                              isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20",
+                            )}
+                          >
+                            {isEnabled ? "禁用" : "启用"}
+                          </button>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); toggleExpanded(label); }}
+                            className="px-2.5 py-1 text-xs rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors"
+                          >
+                            {expanded ? "收起" : "详情"}
+                          </button>
+                          {value.dynamic && (
                             <button
                               onClick={(event) => { event.stopPropagation(); onRemoveBackend(label); }}
                               className="p-1.5 rounded-md bg-destructive/10 border border-destructive/20 text-destructive hover:bg-destructive/20 transition-colors"
@@ -215,40 +323,53 @@ export function NodesPage({
                         </div>
                       </div>
 
-                      <div className="px-5 py-3 md:pt-4 md:pb-4 border-t border-border/40 bg-secondary/10 grid grid-cols-4 md:grid-cols-4 xl:grid-cols-8 gap-y-4 gap-x-3 items-center">
+                      <div className="px-5 py-3 md:pt-4 md:pb-4 border-t border-border/40 bg-secondary/10 grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-3 items-center">
                         <div className="flex flex-col">
                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">请求</span>
                           <span className="text-sm font-mono font-medium text-indigo-500 dark:text-indigo-400">{value.calls}</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">流式</span>
-                          <span className="text-sm font-mono font-medium text-blue-500 dark:text-blue-400">{value.streamingCalls ?? 0}</span>
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">成功</span>
+                          <span className="text-sm font-mono font-medium text-green-500 dark:text-green-400">{successCalls}</span>
                         </div>
                         <div className="flex flex-col">
                           <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">错误</span>
                           <span className={cn("text-sm font-mono font-medium", value.errors > 0 ? "text-destructive" : "text-green-500 dark:text-green-400")}>{value.errors}</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输入 Token</span>
-                          <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.promptTokens)}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输出 Token</span>
-                          <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.completionTokens)}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">均耗时</span>
-                          <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.calls > 0 ? `${value.avgDurationMs}ms` : "--"}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">首 Token</span>
-                          <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.avgTtftMs ? `${value.avgTtftMs}ms` : "--"}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">开销</span>
-                          <span className="text-sm font-mono font-medium text-amber-500 dark:text-amber-400">${((value.promptTokens * DEFAULT_PRICING.input + value.completionTokens * DEFAULT_PRICING.output) / 1_000_000).toFixed(2)}</span>
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">总 Token</span>
+                          <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.totalTokens)}</span>
                         </div>
                       </div>
+
+                      {expanded && (
+                        <div className="px-5 py-4 border-t border-border/40 bg-background/40 grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-3 items-center">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">流式</span>
+                            <span className="text-sm font-mono font-medium text-blue-500 dark:text-blue-400">{value.streamingCalls ?? 0}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输入 Token</span>
+                            <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.promptTokens)}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">输出 Token</span>
+                            <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.completionTokens)}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">均耗时</span>
+                            <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.calls > 0 ? `${value.avgDurationMs}ms` : "--"}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">首 Token</span>
+                            <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.avgTtftMs ? `${value.avgTtftMs}ms` : "--"}</span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">开销</span>
+                            <span className="text-sm font-mono font-medium text-amber-500 dark:text-amber-400">${((value.promptTokens * DEFAULT_PRICING.input + value.completionTokens * DEFAULT_PRICING.output) / 1_000_000).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
