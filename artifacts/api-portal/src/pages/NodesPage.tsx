@@ -74,6 +74,7 @@ export function NodesPage({
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [envPromptCopied, setEnvPromptCopied] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   const ENV_NODE_PROMPT =
     `请在当前项目中添加一个环境变量将子节点注册为永久节点：\n\n` +
@@ -85,6 +86,13 @@ export function NodesPage({
     navigator.clipboard.writeText(ENV_NODE_PROMPT).then(() => {
       setEnvPromptCopied(true);
       setTimeout(() => setEnvPromptCopied(false), 2000);
+    });
+  };
+
+  const copyUrl = (key: string, url: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedUrl(key);
+      window.setTimeout(() => setCopiedUrl((current) => (current === key ? null : current)), 2000);
     });
   };
 
@@ -132,41 +140,42 @@ export function NodesPage({
             {localNode ? (
               (() => {
                 const [, value] = localNode;
-                const isEnabled = value.enabled !== false;
                 const isHealthy = value.health === "healthy";
                 const expanded = !!expandedNodes.local;
                 const successCalls = Math.max(0, value.calls - value.errors);
+                const localUrl = value.url ?? window.location.origin;
 
                 return (
                   <div className="rounded-xl border border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.05)] bg-indigo-500/5 overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => toggleExpanded("local")}
-                      className="w-full p-4 text-left"
-                    >
+                    <div className="p-4">
                       <div className="flex flex-col md:flex-row md:items-center gap-4">
                         <div className="flex items-center gap-3 w-full md:w-auto">
-                          <div className={cn("w-2 h-2 rounded-full flex-shrink-0", !isEnabled ? "bg-muted-foreground" : isHealthy ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" : "bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]")} />
+                          <div className={cn("w-2 h-2 rounded-full flex-shrink-0", isHealthy ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" : "bg-destructive shadow-[0_0_8px_rgba(239,68,68,0.4)]")} />
                           <div className="flex items-center gap-2 overflow-hidden flex-1 md:w-48">
                             <span className="font-mono font-bold text-sm truncate text-indigo-500">当前节点</span>
                             <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex-shrink-0">本地进程</span>
                           </div>
                         </div>
 
-                        <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-[150px]" title={value.url ?? window.location.origin}>
-                          {value.url ?? window.location.origin}
+                        <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-[150px]" title={localUrl}>
+                          {localUrl}
                         </span>
 
                         <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
                           <button
                             type="button"
-                            onClick={(event) => { event.stopPropagation(); onToggleBackend("local", !isEnabled); }}
-                            className={cn(
-                              "px-2.5 py-1 text-xs rounded-md border transition-colors",
-                              isEnabled ? "bg-amber-500/10 border-amber-500/20 text-amber-600 hover:bg-amber-500/20" : "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 hover:bg-emerald-500/20",
-                            )}
+                            onClick={() => copyUrl("local", localUrl)}
+                            className="px-2.5 py-1 text-xs rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors flex items-center gap-1"
                           >
-                            {isEnabled ? "禁用" : "启用"}
+                            {copiedUrl === "local" ? <Check size={12} /> : <Copy size={12} />}
+                            {copiedUrl === "local" ? "已复制" : "复制"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded("local")}
+                            className="px-2.5 py-1 text-xs rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors"
+                          >
+                            {expanded ? "收起" : "详情"}
                           </button>
                         </div>
                       </div>
@@ -189,7 +198,7 @@ export function NodesPage({
                           <span className="text-sm font-mono font-medium text-emerald-500 dark:text-emerald-400">{fmt(value.totalTokens)}</span>
                         </div>
                       </div>
-                    </button>
+                    </div>
 
                     {expanded && (
                       <div className="px-5 py-4 border-t border-border/40 bg-secondary/10 grid grid-cols-2 md:grid-cols-4 gap-y-4 gap-x-3 items-center">
@@ -297,6 +306,13 @@ export function NodesPage({
                         <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-[150px]" title={value.url}>{value.url ?? label}</span>
 
                         <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
+                          <button
+                            onClick={(event) => { event.stopPropagation(); copyUrl(label, value.url ?? label); }}
+                            className="px-2.5 py-1 text-xs rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors flex items-center gap-1"
+                          >
+                            {copiedUrl === label ? <Check size={12} /> : <Copy size={12} />}
+                            {copiedUrl === label ? "已复制" : "复制"}
+                          </button>
                           <button
                             onClick={(event) => { event.stopPropagation(); onToggleBackend(label, !isEnabled); }}
                             className={cn(

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity } from "lucide-react";
 import { cn } from "../lib/utils";
 import { servicePaths } from "../lib/service";
 import { FALLBACK_VERSION_INFO, type PortalVersionInfo } from "../lib/version";
@@ -108,13 +107,6 @@ export function DashboardPage({
         ? "离线"
         : "检测中";
 
-  const statusDescription =
-    onlineStatus === "online"
-      ? "API 服务当前可访问。"
-      : onlineStatus === "offline"
-        ? "当前无法连接到 API 服务。"
-        : "正在检查当前服务状态。";
-
   return (
     <div className="space-y-6 max-w-5xl">
       <Card className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border-primary/20 shadow-md shadow-primary/5">
@@ -122,7 +114,12 @@ export function DashboardPage({
           <div className="space-y-3">
             <div className="text-sm font-bold tracking-widest uppercase text-primary/80">仪表盘</div>
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-2">{greeting.title}</h1>
+              <div className="flex flex-wrap items-center gap-3 mb-2">
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">{greeting.title}</h1>
+                <span className={cn("text-[11px] px-3 py-1.5 rounded-full border font-medium whitespace-nowrap", statusPillClassName)}>
+                  {statusLabel}
+                </span>
+              </div>
               <p className="text-base text-muted-foreground leading-relaxed">{greeting.subtitle}</p>
             </div>
           </div>
@@ -138,22 +135,6 @@ export function DashboardPage({
               <div className="text-xs text-muted-foreground mt-2">{versionDateText}</div>
             </div>
           </div>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center gap-2 mb-4 text-primary">
-          <Activity size={18} />
-          <h2 className="text-sm font-bold tracking-widest uppercase">服务状态</h2>
-        </div>
-        <div className="flex items-start justify-between gap-4 rounded-xl border border-border/60 bg-secondary/20 p-4">
-          <div>
-            <div className="font-semibold text-sm mb-1">当前部署</div>
-            <p className="text-sm text-muted-foreground leading-relaxed m-0">{statusDescription}</p>
-          </div>
-          <span className={cn("text-[11px] px-3 py-1.5 rounded-full border font-medium whitespace-nowrap", statusPillClassName)}>
-            {statusLabel}
-          </span>
         </div>
       </Card>
     </div>
