@@ -16,75 +16,8 @@ type ModelStat = { calls: number; promptTokens: number; completionTokens: number
 
 const DEFAULT_PRICING = { input: 3, output: 15 };
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "gpt-5": { input: 2.5, output: 10 },
-  "gpt-5-turbo": { input: 1.5, output: 6 },
-  "gpt-5-mini": { input: 0.15, output: 0.6 },
-  "gpt-5-nano": { input: 0.075, output: 0.3 },
-  "gpt-4.1": { input: 2, output: 8 },
-  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
-  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
-  "gpt-4o": { input: 2.5, output: 10 },
-  "gpt-4o-mini": { input: 0.15, output: 0.6 },
-  "gpt-4-turbo": { input: 10, output: 30 },
-  "gpt-4": { input: 30, output: 60 },
-  "gpt-3.5-turbo": { input: 0.5, output: 1.5 },
-  "o4-mini": { input: 1.1, output: 4.4 },
-  "o3": { input: 10, output: 40 },
-  "o3-mini": { input: 1.1, output: 4.4 },
-  "o1": { input: 15, output: 60 },
-  "o1-mini": { input: 3, output: 12 },
-  "o1-pro": { input: 150, output: 600 },
-  "claude-opus-4-6": { input: 15, output: 75 },
-  "claude-opus-4-5": { input: 15, output: 75 },
-  "claude-opus-4-1": { input: 15, output: 75 },
-  "claude-sonnet-4-6": { input: 3, output: 15 },
-  "claude-sonnet-4-5": { input: 3, output: 15 },
-  "claude-haiku-4-5": { input: 0.8, output: 4 },
-  "claude-3-7-sonnet": { input: 3, output: 15 },
-  "claude-3-5-sonnet": { input: 3, output: 15 },
-  "claude-3-5-haiku": { input: 0.8, output: 4 },
-  "claude-3-opus": { input: 15, output: 75 },
-  "claude-3-sonnet": { input: 3, output: 15 },
-  "claude-3-haiku": { input: 0.25, output: 1.25 },
-  "gemini-3-pro": { input: 1.25, output: 10 },
-  "gemini-3.1-pro": { input: 1.25, output: 10 },
-  "gemini-3-flash": { input: 0.15, output: 0.6 },
-  "gemini-2.5-pro": { input: 1.25, output: 10 },
-  "gemini-2.5-flash": { input: 0.15, output: 0.6 },
-  "gemini-2.0-flash": { input: 0.1, output: 0.4 },
-  "gemini-2.0-flash-lite": { input: 0.075, output: 0.3 },
-  "gemini-1.5-pro": { input: 1.25, output: 5 },
-  "gemini-1.5-flash": { input: 0.075, output: 0.3 },
-  "gemini-1.5-flash-8b": { input: 0.0375, output: 0.15 },
-  "grok-4": { input: 3, output: 15 },
-  "grok-4.1": { input: 3, output: 15 },
-  "grok-4.20": { input: 3, output: 15 },
-  "llama-4": { input: 0.2, output: 0.8 },
-  "deepseek-v3": { input: 0.27, output: 1.1 },
-  "deepseek-r1": { input: 0.55, output: 2.19 },
-  "mistral-small": { input: 0.1, output: 0.3 },
-  "qwen3": { input: 0.3, output: 1.2 },
-  "command-a": { input: 2.5, output: 10 },
-  "nova-premier": { input: 2.5, output: 10 },
-  "ernie-4.5": { input: 1, output: 4 },
-};
-
-function getModelPrice(model: string): { input: number; output: number } {
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
-  const stripped = model.replace(/^[a-z0-9_-]+\//, "");
-  if (MODEL_PRICING[stripped]) return MODEL_PRICING[stripped];
-  const base = stripped.replace(/-(thinking|latest|preview)$/g, "").replace(/-\d{4}-\d{2}-\d{2}$/, "");
-  if (MODEL_PRICING[base]) return MODEL_PRICING[base];
-  for (const [key, val] of Object.entries(MODEL_PRICING)) {
-    if (stripped.startsWith(key) || base.startsWith(key)) return val;
-  }
-  return DEFAULT_PRICING;
-}
-
-function estimateModelCost(model: string, prompt: number, completion: number): number {
-  const p = getModelPrice(model);
-  return (prompt * p.input + completion * p.output) / 1_000_000;
+function estimateCostFallback(prompt: number, completion: number): number {
+  return (prompt * DEFAULT_PRICING.input + completion * DEFAULT_PRICING.output) / 1_000_000;
 }
 
 function inferProvider(model: string): string {
@@ -156,15 +89,15 @@ export function StatsPage({
     : [];
 
   const totalModelCost = modelStats
-    ? chatModelEntries.reduce((sum, [model, ms]) => sum + estimateModelCost(model, ms.promptTokens, ms.completionTokens), 0)
+    ? chatModelEntries.reduce((sum, [, ms]) => sum + estimateCostFallback(ms.promptTokens, ms.completionTokens), 0)
     : null;
 
   const totalModelInputCost = modelStats
-    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (ms.promptTokens * getModelPrice(model).input) / 1_000_000, 0)
+    ? chatModelEntries.reduce((sum, [, ms]) => sum + (ms.promptTokens * DEFAULT_PRICING.input) / 1_000_000, 0)
     : null;
 
   const totalModelOutputCost = modelStats
-    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (ms.completionTokens * getModelPrice(model).output) / 1_000_000, 0)
+    ? chatModelEntries.reduce((sum, [, ms]) => sum + (ms.completionTokens * DEFAULT_PRICING.output) / 1_000_000, 0)
     : null;
 
   const hasModelStats = chatModelEntries.some(([, ms]) => ms.calls > 0) || imageModelEntries.some(([, ms]) => ms.calls > 0);
@@ -184,7 +117,7 @@ export function StatsPage({
           promptTokens: ms.promptTokens,
           completionTokens: ms.completionTokens,
           totalTokens: ms.promptTokens + ms.completionTokens,
-          cost: capability === "image" ? null : estimateModelCost(model, ms.promptTokens, ms.completionTokens),
+          cost: capability === "image" ? null : estimateCostFallback(ms.promptTokens, ms.completionTokens),
         };
       });
 
@@ -208,10 +141,6 @@ export function StatsPage({
 
   const toggleProvider = (provider: string) => {
     setExpandedProviders((prev) => ({ ...prev, [provider]: !prev[provider] }));
-  };
-
-  const estimateCostFallback = (prompt: number, completion: number) => {
-    return (prompt * DEFAULT_PRICING.input + completion * DEFAULT_PRICING.output) / 1_000_000;
   };
 
   const totals = stats ? Object.values(stats).reduce((acc, s) => ({
@@ -299,11 +228,11 @@ export function StatsPage({
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <div className="text-xs text-muted-foreground mb-1">输入 (Prompt)</div>
+                <div className="text-xs text-muted-foreground mb-1">输入</div>
                 <div className="text-2xl font-bold font-mono tracking-tight text-emerald-400">{fmt(totals!.promptTokens)}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">输出 (Completion)</div>
+                <div className="text-xs text-muted-foreground mb-1">输出</div>
                 <div className="text-2xl font-bold font-mono tracking-tight text-emerald-300">{fmt(totals!.completionTokens)}</div>
               </div>
               <div>
