@@ -83,25 +83,27 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
             const isActive = location === item.href;
             const Icon = item.icon;
             return (
-              <Link key={item.href} href={item.href}>
-                <a className={cn(
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 relative group cursor-pointer",
                   isActive 
                     ? "bg-primary/10 text-primary font-medium" 
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground",
                   collapsed && "justify-center px-0"
-                )}>
-                  {isActive && (
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />
-                  )}
-                  <Icon size={18} className={cn("flex-shrink-0", isActive && "text-primary")} />
-                  {!collapsed && <span className="text-sm">{item.label}</span>}
-                  {collapsed && (
-                    <div className="absolute left-full ml-3 px-2.5 py-1 bg-popover text-popover-foreground text-xs font-medium rounded-md shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 border border-border scale-95 group-hover:scale-100 transition-all origin-left">
-                      {item.label}
-                    </div>
-                  )}
-                </a>
+                )}
+              >
+                {isActive && (
+                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />
+                )}
+                <Icon size={18} className={cn("flex-shrink-0", isActive && "text-primary")} />
+                {!collapsed && <span className="text-sm">{item.label}</span>}
+                {collapsed && (
+                  <div className="absolute left-full ml-3 px-2.5 py-1 bg-popover text-popover-foreground text-xs font-medium rounded-md shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 border border-border scale-95 group-hover:scale-100 transition-all origin-left">
+                    {item.label}
+                  </div>
+                )}
               </Link>
             )
           })}
@@ -168,16 +170,17 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
             </div>
             <div className="py-4 px-3 flex flex-col gap-2">
               {NAV_ITEMS.map((item) => (
-                <Link key={item.href} href={item.href}>
-                  <a 
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={cn(
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={cn(
                     "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors cursor-pointer text-sm font-medium",
                     location === item.href ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  )}>
-                    <item.icon size={18} />
-                    <span>{item.label}</span>
-                  </a>
+                  )}
+                >
+                  <item.icon size={18} />
+                  <span>{item.label}</span>
                 </Link>
               ))}
             </div>

@@ -164,8 +164,6 @@ export function DashboardPage({
 
   useEffect(() => {
     let cancelled = false;
-    let nextTimer: number | null = null;
-    let hourlyTimer: number | null = null;
 
     async function loadVersionInfo() {
       try {
@@ -212,6 +210,8 @@ export function DashboardPage({
 
   useEffect(() => {
     let cancelled = false;
+    let nextTimer: number | null = null;
+    let hourlyTimer: number | null = null;
 
     async function probeJson(url: string): Promise<{ ok: boolean; status: number; latencyMs: number; payload?: unknown }> {
       const startedAt = performance.now();
