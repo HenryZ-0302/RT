@@ -68,6 +68,15 @@ function formatReleaseNotes(notes: string): string[] {
     .filter(Boolean);
 }
 
+const GEMINI_NATIVE_SUPPORTED_ENDPOINTS = [
+  "/v1beta/models",
+  "/v1beta/models/:model",
+  "/v1beta/models/:model:generateContent",
+  "/v1beta/models/:model:streamGenerateContent",
+  "/v1beta/models/:model:countTokens",
+  "/v1beta/models/:model:generateImages",
+];
+
 export function DocsPage({ displayUrl }: { displayUrl: string }) {
   const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
 
@@ -159,8 +168,19 @@ export function DocsPage({ displayUrl }: { displayUrl: string }) {
               当前支持 Gemini 原生的常用模型目录、聊天端点与图片生成端点，但不是全量官方 API 镜像。
             </p>
             <div className="text-sm leading-relaxed space-y-2">
-              <p><strong className="text-foreground">已支持：</strong> <code>/v1beta/models</code>、<code>/v1beta/models/:model</code>、<code>/v1beta/models/:model:generateContent</code>、<code>/v1beta/models/:model:streamGenerateContent</code>、<code>/v1beta/models/:model:countTokens</code>、<code>/v1beta/models/:model:generateImages</code></p>
-              <p><strong className="text-foreground">未支持：</strong> 其余 Gemini 原生配套端点暂未完整覆盖，请优先使用统一的 <code>/v1/models</code>、<code>/v1/chat/completions</code> 与 <code>/v1/images/generations</code></p>
+              <div>
+                <strong className="text-foreground">已支持：</strong>
+                <div className="mt-2 space-y-2">
+                  {GEMINI_NATIVE_SUPPORTED_ENDPOINTS.map((endpoint) => (
+                    <div key={endpoint} className="rounded-lg border border-border/50 bg-background/60 px-3 py-2 font-mono text-[13px] break-all text-foreground/90">
+                      {endpoint}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p>
+                <strong className="text-foreground">未支持：</strong> 其余 Gemini 原生配套端点暂未完整覆盖，请优先使用统一的 <code className="break-all">/v1/models</code>、<code className="break-all">/v1/chat/completions</code> 与 <code className="break-all">/v1/images/generations</code>
+              </p>
             </div>
           </div>
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-5">
