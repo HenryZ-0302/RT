@@ -38,6 +38,14 @@ const CLAUDE_ADAPTIVE_THINKING_MODELS = new Set<string>([
 ]);
 const CLAUDE_DEFAULT_THINKING_BUDGET = 16000;
 const CLAUDE_MIN_THINKING_BUDGET = 1024;
+const CLAUDE_MODEL_MAX: Record<string, number> = {
+  "claude-haiku-4-5": 8096,
+  "claude-sonnet-4-5": 64000,
+  "claude-sonnet-4-6": 64000,
+  "claude-opus-4-1": 32000,
+  "claude-opus-4-5": 64000,
+  "claude-opus-4-6": 64000,
+};
 
 const GEMINI_BASE_MODELS = [
   "gemini-3-pro-preview",
@@ -72,6 +80,24 @@ type RegisteredModel = {
   testMode: ModelTestMode;
   description?: string;
 };
+
+function resolveClaudeThinkingModel(model: string, requestedMaxTokens?: number): {
+  actualModel: string;
+  thinkingEnabled: boolean;
+  resolvedMaxTokens: number;
+} {
+  const thinkingEnabled = model.endsWith("-thinking");
+  const actualModel = thinkingEnabled
+    ? model.replace(/-thinking$/, "")
+    : model;
+  const modelMax = CLAUDE_MODEL_MAX[actualModel] ?? 32000;
+  const defaultMaxTokens = thinkingEnabled ? Math.max(modelMax, 32000) : modelMax;
+  return {
+    actualModel,
+    thinkingEnabled,
+    resolvedMaxTokens: Math.min(requestedMaxTokens ?? defaultMaxTokens, modelMax),
+  };
+}
 
 const REGISTERED_MODELS: RegisteredModel[] = [
   ...OPENAI_CHAT_MODELS.map((id) => ({
@@ -1925,21 +1951,7 @@ async function handleChatCompletions(req: Request, res: Response) {
         triedFriendUrls.add(backend.url);
         result = await handleFriendProxy({ req, res, backend, model: selectedModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
       } else if (isClaudeModel) {
-        const thinkingEnabled = selectedModel.endsWith("-thinking");
-        const actualModel = thinkingEnabled
-          ? selectedModel.replace(/-thinking$/, "")
-          : selectedModel;
-        const CLAUDE_MODEL_MAX: Record<string, number> = {
-          "claude-haiku-4-5": 8096,
-          "claude-sonnet-4-5": 64000,
-          "claude-sonnet-4-6": 64000,
-          "claude-opus-4-1": 32000,
-          "claude-opus-4-5": 64000,
-          "claude-opus-4-6": 64000,
-        };
-        const modelMax = CLAUDE_MODEL_MAX[actualModel] ?? 32000;
-        const defaultMaxTokens = thinkingEnabled ? Math.max(modelMax, 32000) : modelMax;
-        const resolvedMaxTokens = Math.min(max_tokens ?? defaultMaxTokens, modelMax);
+        const { actualModel, thinkingEnabled, resolvedMaxTokens } = resolveClaudeThinkingModel(selectedModel, max_tokens);
         const client = makeLocalAnthropic();
         result = await handleClaude({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: resolvedMaxTokens, thinking: thinkingEnabled, tools, toolChoice: tool_choice, startTime });
       } else if (isGeminiModel) {
@@ -2112,26 +2124,63 @@ async function handleAnthropicMessages(req: Request, res: Response) {
     stream?: boolean;
     max_tokens?: number;
     temperature?: number;
-    thinking?: { type: "enabled"; budget_tokens: number };
+    thinking?: { type: "adaptive" } | { type: "enabled"; budget_tokens: number };
     [key: string]: unknown;
   };
 
-  const { model, messages, system, stream, max_tokens, ...rest } = body;
+  const { model, messages, system, stream, max_tokens, thinking, ...rest } = body;
   const selectedModel = model ?? "claude-sonnet-4-5";
-  const maxTokens = max_tokens ?? 4096;
+  const { actualModel, thinkingEnabled, resolvedMaxTokens } = resolveClaudeThinkingModel(selectedModel, max_tokens);
+  const effectiveThinking =
+    thinking
+    ?? (thinkingEnabled
+      ? (
+        CLAUDE_ADAPTIVE_THINKING_MODELS.has(actualModel)
+          ? { type: "adaptive" as const }
+          : { type: "enabled" as const, budget_tokens: Math.max(
+            CLAUDE_MIN_THINKING_BUDGET,
+            Math.min(CLAUDE_DEFAULT_THINKING_BUDGET, resolvedMaxTokens - 1),
+          ) }
+      )
+      : undefined);
   const shouldStream = stream ?? false;
   const startTime = Date.now();
 
-  req.log.info({ model: selectedModel, stream: shouldStream }, "Anthropic /v1/messages request");
+  req.log.info({ model: selectedModel, actualModel, stream: shouldStream, thinking: effectiveThinking }, "Anthropic /v1/messages request");
 
   try {
+    if (thinkingEnabled && thinking) {
+      throw new HttpStatusError(400, `Model alias '${selectedModel}' already implies thinking mode. Remove the explicit thinking parameter or use '${actualModel}'.`);
+    }
+    if (
+      effectiveThinking
+      && effectiveThinking.type === "enabled"
+      && resolvedMaxTokens <= CLAUDE_MIN_THINKING_BUDGET
+    ) {
+      throw new HttpStatusError(
+        400,
+        `Thinking mode for '${actualModel}' requires max_tokens greater than ${CLAUDE_MIN_THINKING_BUDGET}. Received ${resolvedMaxTokens}.`,
+      );
+    }
+    if (
+      effectiveThinking
+      && effectiveThinking.type === "enabled"
+      && effectiveThinking.budget_tokens >= resolvedMaxTokens
+    ) {
+      throw new HttpStatusError(
+        400,
+        `Thinking mode for '${actualModel}' requires max_tokens greater than thinking.budget_tokens. Received max_tokens=${resolvedMaxTokens}.`,
+      );
+    }
+
     const client = makeLocalAnthropic();
 
     const createParams = {
-      model: selectedModel,
-      max_tokens: maxTokens,
+      model: actualModel,
+      max_tokens: resolvedMaxTokens,
       messages,
       ...(system ? { system } : {}),
+      ...(effectiveThinking ? { thinking: effectiveThinking } : {}),
       ...rest,
     } as Parameters<typeof client.messages.create>[0];
 
@@ -2187,16 +2236,17 @@ async function handleAnthropicMessages(req: Request, res: Response) {
   } catch (err: unknown) {
     recordErrorStat("local");
     const errMsg = err instanceof Error ? err.message : "Unknown error";
+    const status = err instanceof HttpStatusError ? err.statusCode : 500;
     req.log.error({ err }, "/v1/messages request failed");
     pushRequestLog({
       method: req.method, path: req.path, model: selectedModel,
-      backend: "local", status: 500, duration: Date.now() - startTime,
+      backend: "local", status, duration: Date.now() - startTime,
       stream: shouldStream, level: "error", error: errMsg,
     });
     if (!res.headersSent) {
-      res.status(500).json({ error: { type: "server_error", message: errMsg } });
+      res.status(status).json({ error: { type: status >= 500 ? "server_error" : "invalid_request_error", message: errMsg } });
     } else {
-      writeAndFlush(res, `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "server_error", message: errMsg } })}\n\n`);
+      writeAndFlush(res, `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: status >= 500 ? "server_error" : "invalid_request_error", message: errMsg } })}\n\n`);
       res.end();
     }
   }
