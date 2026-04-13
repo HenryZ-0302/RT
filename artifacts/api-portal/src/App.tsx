@@ -412,6 +412,7 @@ export default function App() {
             </Route>
             <Route path="/nodes">
               <NodesPage
+                baseUrl={baseUrl}
                 apiKey={apiKey}
                 stats={stats}
                 addUrl={addUrl}

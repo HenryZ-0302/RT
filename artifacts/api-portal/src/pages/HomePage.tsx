@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { cn } from "../lib/utils";
+import { getStoredNodeHealthcheckModel, storeNodeHealthcheckModel } from "../lib/service";
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -27,6 +29,8 @@ export function HomePage({
   stLoading: boolean;
   onToggleSTMode: () => void;
 }) {
+  const [nodeHealthModel, setNodeHealthModel] = useState(() => getStoredNodeHealthcheckModel());
+
   return (
     <div className="space-y-6 max-w-5xl">
       <Card>
@@ -61,6 +65,32 @@ export function HomePage({
               sillyTavernMode ? "left-[32px]" : "left-[3px]"
             )} />
           </button>
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle>节点检测设置</SectionTitle>
+        <div className="space-y-3">
+          <div>
+            <h3 className="font-semibold text-[15px] mb-1">节点模型检测用模型</h3>
+            <p className="text-sm text-muted-foreground leading-relaxed m-0">
+              这个模型只用于主节点和子节点的可用性检测，不影响正常转发与模型列表。
+            </p>
+          </div>
+          <input
+            type="text"
+            value={nodeHealthModel}
+            onChange={(event) => {
+              const next = event.target.value;
+              setNodeHealthModel(next);
+              storeNodeHealthcheckModel(next);
+            }}
+            placeholder="例如：gpt-4o-mini / gemini-2.5-flash / claude-sonnet-4-5"
+            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all text-foreground"
+          />
+          <div className="text-xs text-muted-foreground">
+            当前保存的检测模型：<span className="font-mono text-foreground">{nodeHealthModel || "未设置"}</span>
+          </div>
         </div>
       </Card>
 

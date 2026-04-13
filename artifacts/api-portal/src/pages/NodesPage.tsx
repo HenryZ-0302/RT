@@ -6,9 +6,12 @@ import {
   Copy,
   Check,
   Trash2,
+  Activity,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { FleetManager } from "../components/FleetManager";
+import { getStoredNodeHealthcheckModel } from "../lib/service";
 
 type BackendStat = {
   calls: number;
@@ -44,6 +47,7 @@ function SectionTitle({ children, className }: { children: React.ReactNode; clas
 }
 
 export function NodesPage({
+  baseUrl,
   apiKey,
   stats,
   addUrl,
@@ -58,6 +62,7 @@ export function NodesPage({
   routing,
   onToggleRouting,
 }: {
+  baseUrl: string;
   apiKey: string;
   stats: Record<string, BackendStat> | null;
   addUrl: string;
@@ -75,6 +80,8 @@ export function NodesPage({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [envPromptCopied, setEnvPromptCopied] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [checkingNodes, setCheckingNodes] = useState<Record<string, boolean>>({});
+  const [checkNotice, setCheckNotice] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const ENV_NODE_PROMPT =
     `请在当前项目中添加一个环境变量将子节点注册为永久节点：\n\n` +
@@ -99,6 +106,66 @@ export function NodesPage({
   const confirmRemoveNode = (label: string) => {
     if (!window.confirm(`确认要移除子节点 ${label} 吗？`)) return false;
     return true;
+  };
+
+  const runNodeCheck = async (label: string, targetUrl: string) => {
+    const model = getStoredNodeHealthcheckModel().trim();
+    if (!model) {
+      setCheckNotice({ kind: "error", message: "请先在设置页填写节点检测模型。" });
+      return false;
+    }
+
+    const normalizedBase = targetUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
+    setCheckingNodes((prev) => ({ ...prev, [label]: true }));
+    try {
+      const response = await fetch(`${normalizedBase}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "Reply with exactly: OK" }],
+          max_tokens: 8,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: { message: `HTTP ${response.status}` } }));
+        setCheckNotice({ kind: "error", message: `${label} 检测失败：${err.error?.message ?? `HTTP ${response.status}`}` });
+        return false;
+      }
+
+      setCheckNotice({ kind: "success", message: `${label} 检测成功，模型 ${model} 可用。` });
+      return true;
+    } catch (error) {
+      setCheckNotice({ kind: "error", message: `${label} 检测失败：${(error as Error).message}` });
+      return false;
+    } finally {
+      setCheckingNodes((prev) => ({ ...prev, [label]: false }));
+    }
+  };
+
+  const runCheckForAllSubNodes = async () => {
+    const model = getStoredNodeHealthcheckModel().trim();
+    if (!model) {
+      setCheckNotice({ kind: "error", message: "请先在设置页填写节点检测模型。" });
+      return;
+    }
+    if (!allSubNodes.length) return;
+
+    const results = await Promise.all(
+      allSubNodes.map(async ([label, value]) => ({
+        label,
+        ok: await runNodeCheck(label, value.url ?? label),
+      })),
+    );
+    const successCount = results.filter((item) => item.ok).length;
+    setCheckNotice({
+      kind: successCount === results.length ? "success" : "error",
+      message: `全部检测完成：${successCount}/${results.length} 个子节点通过。`,
+    });
   };
 
   const fmt = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString();
@@ -139,6 +206,21 @@ export function NodesPage({
         </Card>
       ) : (
         <>
+          {checkNotice && (
+            <Card className={cn(
+              "py-3",
+              checkNotice.kind === "success" ? "border-emerald-500/20 bg-emerald-500/5" : "border-destructive/20 bg-destructive/5",
+            )}>
+              <div className={cn(
+                "flex items-center gap-2 text-sm",
+                checkNotice.kind === "success" ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
+              )}>
+                {checkNotice.kind === "success" ? <Check size={14} /> : <AlertCircle size={14} />}
+                <span>{checkNotice.message}</span>
+              </div>
+            </Card>
+          )}
+
           <div>
             <SectionTitle>主节点</SectionTitle>
 
@@ -167,6 +249,15 @@ export function NodesPage({
                         </span>
 
                         <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
+                          <button
+                            type="button"
+                            onClick={() => void runNodeCheck("当前节点", baseUrl)}
+                            disabled={!!checkingNodes["当前节点"]}
+                            className="px-2.5 py-1 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Activity size={12} className={checkingNodes["当前节点"] ? "animate-spin" : ""} />
+                            {checkingNodes["当前节点"] ? "检测中" : "检测"}
+                          </button>
                           <button
                             type="button"
                             onClick={() => copyUrl("local", localUrl)}
@@ -257,13 +348,23 @@ export function NodesPage({
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={toggleSelectAll}
-                    className="text-xs px-3 py-1.5 rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors"
-                  >
-                    {allSelected ? "取消全选" : "全选子节点"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleSelectAll}
+                      className="text-xs px-3 py-1.5 rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors"
+                    >
+                      {allSelected ? "取消全选" : "全选子节点"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runCheckForAllSubNodes()}
+                      disabled={allSubNodes.length === 0 || Object.values(checkingNodes).some(Boolean)}
+                      className="text-xs px-3 py-1.5 rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+                    >
+                      全部检测
+                    </button>
+                  </div>
                   {someSelected && (
                     <div className="flex items-center gap-2 bg-secondary/40 p-2 rounded-md border border-border">
                       <span className="text-xs text-muted-foreground font-medium px-2">已选 {selected.size} 项</span>
@@ -317,6 +418,17 @@ export function NodesPage({
                         <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-[150px]" title={value.url}>{value.url ?? label}</span>
 
                         <div className="flex items-center gap-1.5 ml-auto mt-2 md:mt-0">
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void runNodeCheck(label, value.url ?? label);
+                            }}
+                            disabled={!!checkingNodes[label]}
+                            className="px-2.5 py-1 text-xs rounded-md border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1 disabled:opacity-50"
+                          >
+                            <Activity size={12} className={checkingNodes[label] ? "animate-spin" : ""} />
+                            {checkingNodes[label] ? "检测中" : "检测"}
+                          </button>
                           <button
                             onClick={(event) => { event.stopPropagation(); copyUrl(label, value.url ?? label); }}
                             className="px-2.5 py-1 text-xs rounded-md border border-border bg-secondary/40 text-muted-foreground hover:bg-secondary/60 transition-colors flex items-center gap-1"

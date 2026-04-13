@@ -2,6 +2,7 @@ export const SERVICE_STORAGE_KEY = "service_access_key";
 export const LEGACY_STORAGE_KEY = "proxy_api_key";
 export const SERVICE_KEY_ENV = "SERVICE_ACCESS_KEY";
 export const LEGACY_SERVICE_KEY_ENV = "PROXY_API_KEY";
+export const NODE_HEALTHCHECK_MODEL_KEY = "node_healthcheck_model";
 
 export function getStoredServiceKey(): string {
   return localStorage.getItem(SERVICE_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY) ?? "";
@@ -10,6 +11,14 @@ export function getStoredServiceKey(): string {
 export function storeServiceKey(value: string): void {
   localStorage.setItem(SERVICE_STORAGE_KEY, value);
   localStorage.setItem(LEGACY_STORAGE_KEY, value);
+}
+
+export function getStoredNodeHealthcheckModel(): string {
+  return localStorage.getItem(NODE_HEALTHCHECK_MODEL_KEY) ?? "gpt-4o-mini";
+}
+
+export function storeNodeHealthcheckModel(value: string): void {
+  localStorage.setItem(NODE_HEALTHCHECK_MODEL_KEY, value.trim());
 }
 
 function serviceBase(baseUrl: string): string {
