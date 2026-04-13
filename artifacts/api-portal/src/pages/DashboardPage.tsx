@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, HeartPulse } from "lucide-react";
+import { ChevronRight, HeartPulse, X } from "lucide-react";
 import { cn } from "../lib/utils";
 import { servicePaths } from "../lib/service";
 import { FALLBACK_VERSION_INFO, type PortalVersionInfo } from "../lib/version";
@@ -131,6 +131,13 @@ function buildHourlySeries(history: HealthHistoryBucket[], now: Date): Array<Hea
   return series;
 }
 
+function getMsUntilNextHour(now: Date): number {
+  const next = new Date(now);
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1);
+  return next.getTime() - now.getTime();
+}
+
 export function DashboardPage({
   baseUrl,
   displayUrl,
@@ -147,7 +154,7 @@ export function DashboardPage({
     checkedAt: null,
   });
   const [history, setHistory] = useState<HealthHistoryStore>(EMPTY_HISTORY);
-  const [selectedService, setSelectedService] = useState<HealthServiceKey>("apiServer");
+  const [openService, setOpenService] = useState<HealthServiceKey | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -157,6 +164,8 @@ export function DashboardPage({
 
   useEffect(() => {
     let cancelled = false;
+    let nextTimer: number | null = null;
+    let hourlyTimer: number | null = null;
 
     async function loadVersionInfo() {
       try {
@@ -301,10 +310,15 @@ export function DashboardPage({
     }
 
     void checkHealth();
-    const timer = window.setInterval(() => { void checkHealth(); }, 30000);
+    nextTimer = window.setTimeout(() => {
+      void checkHealth();
+      hourlyTimer = window.setInterval(() => { void checkHealth(); }, 60 * 60 * 1000);
+    }, getMsUntilNextHour(new Date()));
+
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (nextTimer !== null) window.clearTimeout(nextTimer);
+      if (hourlyTimer !== null) window.clearInterval(hourlyTimer);
     };
   }, [apiKey, baseUrl]);
 
@@ -318,6 +332,7 @@ export function DashboardPage({
     return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
   };
 
+  const selectedService = openService ?? "apiServer";
   const selectedSeries = useMemo(() => buildHourlySeries(history[selectedService], now), [history, now, selectedService]);
   const selectedSummary = useMemo(() => {
     const checks = selectedSeries.reduce((sum, item) => sum + item.checks, 0);
@@ -370,10 +385,9 @@ export function DashboardPage({
             <button
               key={item.label}
               type="button"
-              onClick={() => setSelectedService(item.key)}
+              onClick={() => setOpenService(item.key)}
               className={cn(
                 "rounded-xl border border-border/60 bg-secondary/20 p-4 text-left transition-all hover:border-primary/40 hover:bg-secondary/30",
-                selectedService === item.key && "border-primary/40 ring-1 ring-primary/20 bg-primary/5",
               )}
             >
               <div className="flex items-center justify-between gap-3 mb-2">
@@ -382,7 +396,7 @@ export function DashboardPage({
                   <span className={cn("text-[11px] px-2 py-1 rounded-full border font-medium", statusBadge(item.value.status))}>
                     {item.value.status === "ok" ? "正常" : item.value.status === "error" ? "异常" : "检测中"}
                   </span>
-                  <ChevronRight size={16} className={cn("text-muted-foreground transition-transform", selectedService === item.key && "rotate-90 text-primary")} />
+                  <ChevronRight size={16} className="text-muted-foreground" />
                 </div>
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed m-0">{item.value.detail}</p>
@@ -390,56 +404,77 @@ export function DashboardPage({
           ))}
         </div>
         <div className="mt-3 text-xs text-muted-foreground">
-          {health.checkedAt ? `上次检测：${health.checkedAt}` : "正在初始化健康检查..."}
-        </div>
-
-        <div className="mt-5 rounded-xl border border-border/60 bg-background/60 p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <div className="text-sm font-semibold mb-1">{selectedService === "apiServer" ? "API 服务器" : "前端门户"} 24 小时可用性</div>
-              <div className="text-xs text-muted-foreground">每次自动检测会写入服务端持久化存储，因此不同设备看到的是同一份历史。</div>
-            </div>
-            <div className="grid grid-cols-3 gap-3 md:min-w-[320px]">
-              <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
-                <div className="text-[11px] text-muted-foreground mb-1">平均可用率</div>
-                <div className="text-lg font-bold">{selectedSummary.availability}%</div>
-              </div>
-              <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
-                <div className="text-[11px] text-muted-foreground mb-1">检测次数</div>
-                <div className="text-lg font-bold">{selectedSummary.checks}</div>
-              </div>
-              <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-2">
-                <div className="text-[11px] text-muted-foreground mb-1">平均延迟</div>
-                <div className="text-lg font-bold">{selectedSummary.avgLatencyMs !== null ? `${selectedSummary.avgLatencyMs}ms` : "--"}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-12 md:grid-cols-24 gap-2 items-end h-44">
-            {selectedSeries.map((item) => (
-              <div key={item.hourKey} className="flex flex-col items-center gap-2 min-w-0">
-                <div className="w-full flex-1 flex items-end">
-                  <div
-                    className={cn(
-                      "w-full rounded-t-md transition-all",
-                      item.checks === 0
-                        ? "bg-muted/70 border border-dashed border-border/70"
-                        : item.availability >= 99
-                          ? "bg-emerald-500/80"
-                          : item.availability >= 80
-                            ? "bg-amber-500/80"
-                            : "bg-destructive/80"
-                    )}
-                    style={{ height: `${Math.max(item.checks > 0 ? item.availability : 8, 8)}%` }}
-                    title={`${item.label} · 可用率 ${Math.round(item.availability)}% · 检测 ${item.checks} 次${item.avgLatencyMs !== null ? ` · 平均 ${item.avgLatencyMs}ms` : ""}`}
-                  />
-                </div>
-                <div className="text-[10px] text-muted-foreground font-mono">{item.label.slice(0, 2)}</div>
-              </div>
-            ))}
-          </div>
+          {health.checkedAt ? `上次检测：${health.checkedAt} · 每小时自动检测一次，点击卡片查看 24 小时历史` : "正在初始化健康检查..."}
         </div>
       </Card>
+
+      {openService && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-4xl rounded-2xl border border-border/60 bg-card shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-border/50 px-6 py-5">
+              <div>
+                <div className="text-lg font-semibold">{openService === "apiServer" ? "API 服务器" : "前端门户"} 24 小时可用性</div>
+                <div className="mt-1 text-sm text-muted-foreground">历史会写入服务端持久化存储，不同设备登录后看到的是同一份检测记录。</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenService(null)}
+                className="rounded-lg border border-border/50 p-2 text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-5 px-6 py-5">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-3">
+                  <div className="text-[11px] text-muted-foreground mb-1">平均可用率</div>
+                  <div className="text-lg font-bold">{selectedSummary.availability}%</div>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-3">
+                  <div className="text-[11px] text-muted-foreground mb-1">检测次数</div>
+                  <div className="text-lg font-bold">{selectedSummary.checks}</div>
+                </div>
+                <div className="rounded-lg border border-border/50 bg-secondary/30 px-3 py-3">
+                  <div className="text-[11px] text-muted-foreground mb-1">平均延迟</div>
+                  <div className="text-lg font-bold">{selectedSummary.avgLatencyMs !== null ? `${selectedSummary.avgLatencyMs}ms` : "--"}</div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border/60 bg-background/60 p-5">
+                <div className="grid grid-cols-12 md:grid-cols-24 gap-2 items-end h-52">
+                  {selectedSeries.map((item) => (
+                    <div key={item.hourKey} className="flex flex-col items-center gap-2 min-w-0">
+                      <div className="w-full flex-1 flex items-end">
+                        <div
+                          className={cn(
+                            "w-full rounded-t-md transition-all",
+                            item.checks === 0
+                              ? "bg-muted/70 border border-dashed border-border/70"
+                              : item.availability >= 99
+                                ? "bg-emerald-500/80"
+                                : item.availability >= 80
+                                  ? "bg-amber-500/80"
+                                  : "bg-destructive/80"
+                          )}
+                          style={{ height: `${Math.max(item.checks > 0 ? item.availability : 8, 8)}%` }}
+                          title={`${item.label} · 可用率 ${Math.round(item.availability)}% · 检测 ${item.checks} 次${item.avgLatencyMs !== null ? ` · 平均 ${item.avgLatencyMs}ms` : ""}`}
+                        />
+                      </div>
+                      <div className="text-[10px] text-muted-foreground font-mono">{item.label.slice(0, 2)}</div>
+                    </div>
+                  ))}
+                </div>
+                {selectedSummary.checks === 0 && (
+                  <div className="mt-4 text-sm text-muted-foreground">
+                    当前还没有可展示的历史检测结果。登录后会先做一次即时检测，之后每小时自动补一条记录。
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
