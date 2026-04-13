@@ -2236,7 +2236,11 @@ async function handleAnthropicMessages(req: Request, res: Response) {
   } catch (err: unknown) {
     recordErrorStat("local");
     const errMsg = err instanceof Error ? err.message : "Unknown error";
-    const status = err instanceof HttpStatusError ? err.statusCode : 500;
+    const status = err instanceof HttpStatusError
+      ? err.status
+      : (err != null && typeof (err as Record<string, unknown>).status === "number")
+        ? (err as Record<string, unknown>).status as number
+        : 500;
     req.log.error({ err }, "/v1/messages request failed");
     pushRequestLog({
       method: req.method, path: req.path, model: selectedModel,
