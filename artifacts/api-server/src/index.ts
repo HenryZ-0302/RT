@@ -2,7 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { initReady, statsReady } from "./routes/proxy";
 
-const rawPort = process.env["PORT"] ?? "8787";
+const rawPort = process.env["PORT"] ?? "8080";
 
 const port = Number(rawPort);
 

@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-const rawPort = process.env.PORT ?? "8080";
+const rawPort = process.env.PORT ?? "3000";
 
 const port = Number(rawPort);
 
@@ -13,7 +13,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 const basePath = process.env.BASE_PATH ?? "/";
-const apiProxyTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8787";
+const apiProxyTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8080";
 
 export default defineConfig({
   base: basePath,
