@@ -12,6 +12,9 @@ paths = ["/api", "/v1", "/v1beta"]
 [services.development]
 run = "pnpm --filter @workspace/api-server run dev"
 
+[services.development.env]
+PORT = "8787"
+
 [services.production]
 
 [services.production.build]
