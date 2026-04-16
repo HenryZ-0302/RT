@@ -1,32 +1,34 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { readJson, writeJson } from "../lib/cloudPersist";
 import { getServiceAccessKey } from "../lib/serviceConfig";
 
 const router: IRouter = Router();
 
-const SETTINGS_FILE = resolve(process.cwd(), "server_settings.json");
+const SETTINGS_FILE = "server_settings.json";
 
 interface ServerSettings {
   sillyTavernMode: boolean;
 }
 
-function loadSettings(): ServerSettings {
-  try {
-    if (existsSync(SETTINGS_FILE)) {
-      return JSON.parse(readFileSync(SETTINGS_FILE, "utf8")) as ServerSettings;
+const DEFAULT_SETTINGS: ServerSettings = {
+  sillyTavernMode: false,
+};
+
+const settings: ServerSettings = { ...DEFAULT_SETTINGS };
+
+export const settingsReady: Promise<void> = readJson<ServerSettings>(SETTINGS_FILE)
+  .then((saved) => {
+    if (saved && typeof saved.sillyTavernMode === "boolean") {
+      settings.sillyTavernMode = saved.sillyTavernMode;
     }
-  } catch {}
-  return { sillyTavernMode: false };
-}
+  })
+  .catch(() => {
+    // Keep defaults if persisted settings cannot be loaded.
+  });
 
-function saveSettings(settings: ServerSettings): void {
-  try {
-    writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
-  } catch {}
+async function saveSettings(): Promise<void> {
+  await writeJson(SETTINGS_FILE, settings);
 }
-
-const settings: ServerSettings = loadSettings();
 
 export function getSillyTavernMode(): boolean {
   return settings.sillyTavernMode;
@@ -59,7 +61,7 @@ function getCompatibilitySettings(req: Request, res: Response) {
   res.json({ enabled: settings.sillyTavernMode });
 }
 
-function updateCompatibilitySettings(req: Request, res: Response) {
+async function updateCompatibilitySettings(req: Request, res: Response) {
   if (!checkApiKey(req, res)) return;
 
   const { enabled } = req.body as { enabled?: boolean };
@@ -69,13 +71,15 @@ function updateCompatibilitySettings(req: Request, res: Response) {
   }
 
   settings.sillyTavernMode = enabled;
-  saveSettings(settings);
+  await saveSettings().catch(() => null);
   res.json({ enabled: settings.sillyTavernMode });
 }
 
 for (const path of ["/settings/sillytavern", "/service/settings/compatibility"]) {
   router.get(path, getCompatibilitySettings);
-  router.post(path, updateCompatibilitySettings);
+  router.post(path, (req, res) => {
+    void updateCompatibilitySettings(req, res);
+  });
 }
 
 export default router;

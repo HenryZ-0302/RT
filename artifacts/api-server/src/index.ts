@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { initReady, statsReady } from "./routes/proxy";
+import { settingsReady } from "./routes/settings";
 
 const rawPort = process.env["PORT"] ?? "8080";
 
@@ -10,7 +11,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-Promise.all([initReady, statsReady]).then(() => {
+Promise.all([initReady, statsReady, settingsReady]).then(() => {
   app.listen(port, (err) => {
     if (err) {
       logger.error({ err }, "Error listening on port");
