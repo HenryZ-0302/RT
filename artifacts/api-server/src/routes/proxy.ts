@@ -104,6 +104,32 @@ function resolveClaudeThinkingModel(model: string, requestedMaxTokens?: number):
   };
 }
 
+const ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES: Record<string, string> = {
+  web_search_20260209: "web_search_20250305",
+};
+
+function sanitizeAnthropicNativeValue(value: unknown): unknown {
+  if (value === "[undefined]") return undefined;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeAnthropicNativeValue(item))
+      .filter((item) => item !== undefined);
+  }
+  if (value && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const [key, raw] of Object.entries(source)) {
+      const cleaned = sanitizeAnthropicNativeValue(raw);
+      if (cleaned !== undefined) result[key] = cleaned;
+    }
+    if (typeof result.type === "string" && ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES[result.type]) {
+      result.type = ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES[result.type];
+    }
+    return result;
+  }
+  return value;
+}
+
 const REGISTERED_MODELS: RegisteredModel[] = [
   ...OPENAI_CHAT_MODELS.map((id) => ({
     id,
@@ -2122,7 +2148,7 @@ router.post(/^\/v1beta\/models\/([^:]+):countTokens$/, requireApiKey, async (req
 // ---------------------------------------------------------------------------
 
 async function handleAnthropicMessages(req: Request, res: Response) {
-  const body = req.body as {
+  const body = sanitizeAnthropicNativeValue(req.body) as {
     model?: string;
     messages: AnthropicMessage[];
     system?: string | { type: string; text: string }[];
