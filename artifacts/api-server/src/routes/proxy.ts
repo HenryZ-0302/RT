@@ -60,10 +60,12 @@ const GEMINI_IMAGE_MODELS = [
 
 const OPENROUTER_FEATURED = [
   "x-ai/grok-4.20", "x-ai/grok-4.1-fast", "x-ai/grok-4-fast",
+  "x-ai/grok-4.20-multi-agent", "x-ai/grok-code-fast-1",
   "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
   "deepseek/deepseek-v3.2", "deepseek/deepseek-r1", "deepseek/deepseek-r1-0528",
-  "mistralai/mistral-small-2603", "qwen/qwen3.5-122b-a10b",
-  "google/gemini-2.5-pro", "anthropic/claude-opus-4.6",
+  "mistralai/mistral-small-2603", "qwen/qwen3.5-122b-a10b", "qwen/qwen3-coder-next",
+  "google/gemini-2.5-pro", "google/gemini-3.1-pro-preview",
+  "anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7",
   "cohere/command-a", "amazon/nova-premier-v1", "baidu/ernie-4.5-300b-a47b",
 ];
 
