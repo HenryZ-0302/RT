@@ -115,10 +115,10 @@ export function NodesPage({
       return false;
     }
 
-    const normalizedBase = targetUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
+    const normalizedBase = targetUrl.replace(/\/+$/, "").replace(/\/api(?:\/v1)?$/i, "");
     setCheckingNodes((prev) => ({ ...prev, [label]: true }));
     try {
-      const response = await fetch(`${normalizedBase}/v1/chat/completions`, {
+      const response = await fetch(`${normalizedBase}/api/v1/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

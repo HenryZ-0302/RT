@@ -69,16 +69,19 @@ function formatReleaseNotes(notes: string): string[] {
 }
 
 const GEMINI_NATIVE_SUPPORTED_ENDPOINTS = [
-  "/v1beta/models",
-  "/v1beta/models/:model",
-  "/v1beta/models/:model:generateContent",
-  "/v1beta/models/:model:streamGenerateContent",
-  "/v1beta/models/:model:countTokens",
-  "/v1beta/models/:model:generateImages",
+  "/api/v1beta/models",
+  "/api/v1beta/models/:model",
+  "/api/v1beta/models/:model:generateContent",
+  "/api/v1beta/models/:model:streamGenerateContent",
+  "/api/v1beta/models/:model:countTokens",
+  "/api/v1beta/models/:model:generateImages",
 ];
 
 export function DocsPage({ displayUrl }: { displayUrl: string }) {
   const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
+  const recommendedOpenAIBaseUrl = `${displayUrl.replace(/\/+$/, "")}/api/v1`;
+  const recommendedGeminiBaseUrl = `${displayUrl.replace(/\/+$/, "")}/api/v1beta`;
+  const recommendedClaudeMessagesUrl = `${displayUrl.replace(/\/+$/, "")}/api/v1/messages`;
 
   useEffect(() => {
     let cancelled = false;
@@ -179,7 +182,7 @@ export function DocsPage({ displayUrl }: { displayUrl: string }) {
                 </div>
               </div>
               <p>
-                <strong className="text-foreground">未支持：</strong> 其余 Gemini 原生配套端点暂未完整覆盖，请优先使用统一的 <code className="break-all">/v1/models</code>、<code className="break-all">/v1/chat/completions</code> 与 <code className="break-all">/v1/images/generations</code>
+                <strong className="text-foreground">未支持：</strong> 其余 Gemini 原生配套端点暂未完整覆盖，请优先使用统一的 <code className="break-all">/api/v1/models</code>、<code className="break-all">/api/v1/chat/completions</code> 与 <code className="break-all">/api/v1/images/generations</code>
               </p>
             </div>
           </div>
@@ -189,26 +192,44 @@ export function DocsPage({ displayUrl }: { displayUrl: string }) {
               当前支持 Anthropic Messages 原生请求格式，但同样不是全量 Anthropic 官方接口兼容。
             </p>
             <div className="text-sm leading-relaxed space-y-2">
-              <p><strong className="text-foreground">已支持：</strong> <code>/v1/messages</code></p>
-              <p><strong className="text-foreground">未支持：</strong> 其余 Anthropic 原生配套端点暂未全部实现，请优先使用统一的 OpenAI 兼容接口</p>
+              <p><strong className="text-foreground">已支持：</strong> <code className="break-all">/api/v1/messages</code></p>
+              <p><strong className="text-foreground">未支持：</strong> 其余 Anthropic 原生配套端点暂未全部实现，请优先使用统一的 OpenAI 兼容接口 <code className="break-all">/api/v1/*</code></p>
             </div>
           </div>
         </div>
       </Card>
 
       <Card>
-        <SectionTitle>Base URL {displayUrl.includes(".replit.dev") && <span className="ml-2 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-normal normal-case">DEV</span>}</SectionTitle>
-        <div className="flex items-center gap-3 w-full">
-          <div className="flex-1 bg-secondary/50 border border-border/60 rounded-lg p-3 font-mono text-sm text-primary overflow-hidden text-ellipsis whitespace-nowrap shadow-inner">
-            {displayUrl}
+        <SectionTitle>推荐入口 {displayUrl.includes(".replit.dev") && <span className="ml-2 text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-normal normal-case">DEV</span>}</SectionTitle>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 w-full">
+            <div className="min-w-0 flex-1 bg-secondary/50 border border-border/60 rounded-lg p-3 font-mono text-sm text-primary overflow-hidden text-ellipsis whitespace-nowrap shadow-inner">
+              {recommendedOpenAIBaseUrl}
+            </div>
+            <CopyButton text={recommendedOpenAIBaseUrl} label="复制 OpenAI 兼容" />
           </div>
-          <CopyButton text={displayUrl} label="复制 URL" />
+          <div className="text-xs text-muted-foreground leading-relaxed">
+            推荐客户端默认 Base URL 使用 <code className="break-all">/api/v1</code>。这样模型列表、聊天与图片接口都会稳定命中后端。
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground mb-2">Gemini Native</div>
+              <div className="font-mono text-primary break-all">{recommendedGeminiBaseUrl}</div>
+            </div>
+            <div className="rounded-lg border border-border/50 bg-background/60 p-3">
+              <div className="text-xs font-semibold tracking-wide uppercase text-muted-foreground mb-2">Claude Messages</div>
+              <div className="font-mono text-primary break-all">{recommendedClaudeMessagesUrl}</div>
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground leading-relaxed">
+            不再推荐客户端直接使用裸 <code className="break-all">/v1</code> 或 <code className="break-all">/v1beta</code>，部署环境下更稳的入口是 <code className="break-all">/api/v1</code> 与 <code className="break-all">/api/v1beta</code>。
+          </div>
         </div>
         {displayUrl.includes(".replit.dev") && (
           <div className="mt-4 flex items-start gap-3 bg-secondary/30 p-3 rounded-lg border border-border/40">
             <Info size={16} className="text-muted-foreground flex-shrink-0 mt-0.5" />
             <p className="text-[13px] text-muted-foreground leading-relaxed m-0">
-              当前显示为开发预览地址。将本项目 <strong className="text-foreground font-medium">Publish（发布）</strong> 后，请以生产环境域名（<code className="text-primary bg-primary/5 px-1 py-0.5 rounded mx-1">https://your-app.replit.app</code>）作为正式 Base URL 使用。
+              当前显示为开发预览地址。将本项目 <strong className="text-foreground font-medium">Publish（发布）</strong> 后，请以生产环境域名下的 <code className="text-primary bg-primary/5 px-1 py-0.5 rounded mx-1">/api/v1</code> 作为正式 OpenAI 兼容入口使用。
             </p>
           </div>
         )}

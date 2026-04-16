@@ -216,7 +216,7 @@ export function ModelsPage({
     try {
       const testMode = modelMetaMap.get(modelId)?.testMode ?? "chat";
       const res = await fetch(
-        testMode === "image" ? `${baseUrl}/v1/images/generations` : `${baseUrl}/v1/chat/completions`,
+        testMode === "image" ? `${baseUrl}/api/v1/images/generations` : `${baseUrl}/api/v1/chat/completions`,
         {
           method: "POST",
           headers: {
