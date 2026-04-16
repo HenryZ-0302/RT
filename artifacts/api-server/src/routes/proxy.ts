@@ -104,6 +104,21 @@ function resolveClaudeThinkingModel(model: string, requestedMaxTokens?: number):
   };
 }
 
+function shouldForceClaudeSummarizedThinking(model: string): boolean {
+  return model === "claude-opus-4-7";
+}
+
+function normalizeClaudeThinkingDisplay<
+  T extends { type: "adaptive"; display?: "summarized" | "omitted" }
+    | { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" }
+>(model: string, thinking: T): T {
+  if (!shouldForceClaudeSummarizedThinking(model) || thinking.display) return thinking;
+  return {
+    ...thinking,
+    display: "summarized",
+  };
+}
+
 const ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES: Record<string, string> = {
   web_search_20260209: "web_search_20250305",
 };
@@ -2155,29 +2170,38 @@ async function handleAnthropicMessages(req: Request, res: Response) {
     stream?: boolean;
     max_tokens?: number;
     temperature?: number;
-    thinking?: { type: "adaptive" } | { type: "enabled"; budget_tokens: number };
+    thinking?:
+      | { type: "adaptive"; display?: "summarized" | "omitted" }
+      | { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" };
     [key: string]: unknown;
   };
 
   const { model, messages, system, stream, max_tokens, thinking, ...rest } = body;
   const selectedModel = model ?? "claude-sonnet-4-5";
   const { actualModel, thinkingEnabled, resolvedMaxTokens } = resolveClaudeThinkingModel(selectedModel, max_tokens);
-  const effectiveThinking =
+  const effectiveThinking = (
     thinking
     ?? (thinkingEnabled
       ? (
         CLAUDE_ADAPTIVE_THINKING_MODELS.has(actualModel)
-          ? { type: "adaptive" as const }
+          ? {
+            type: "adaptive" as const,
+            ...(shouldForceClaudeSummarizedThinking(actualModel) ? { display: "summarized" as const } : {}),
+          }
           : { type: "enabled" as const, budget_tokens: Math.max(
             CLAUDE_MIN_THINKING_BUDGET,
             Math.min(CLAUDE_DEFAULT_THINKING_BUDGET, resolvedMaxTokens - 1),
-          ) }
+          ), ...(shouldForceClaudeSummarizedThinking(actualModel) ? { display: "summarized" as const } : {}) }
       )
-      : undefined);
+      : undefined)
+  );
+  const normalizedThinking = effectiveThinking
+    ? normalizeClaudeThinkingDisplay(actualModel, effectiveThinking)
+    : undefined;
   const shouldStream = stream ?? false;
   const startTime = Date.now();
 
-  req.log.info({ model: selectedModel, actualModel, stream: shouldStream, thinking: effectiveThinking }, "Anthropic /v1/messages request");
+  req.log.info({ model: selectedModel, actualModel, stream: shouldStream, thinking: normalizedThinking }, "Anthropic /v1/messages request");
 
   try {
     // If the model alias implies thinking AND the client also sent an explicit
@@ -2187,8 +2211,8 @@ async function handleAnthropicMessages(req: Request, res: Response) {
       req.log.info({ model: selectedModel, actualModel }, "Model alias implies thinking; client also sent explicit thinking param — using client value");
     }
     if (
-      effectiveThinking
-      && effectiveThinking.type === "enabled"
+      normalizedThinking
+      && normalizedThinking.type === "enabled"
       && resolvedMaxTokens <= CLAUDE_MIN_THINKING_BUDGET
     ) {
       throw new HttpStatusError(
@@ -2197,9 +2221,9 @@ async function handleAnthropicMessages(req: Request, res: Response) {
       );
     }
     if (
-      effectiveThinking
-      && effectiveThinking.type === "enabled"
-      && effectiveThinking.budget_tokens >= resolvedMaxTokens
+      normalizedThinking
+      && normalizedThinking.type === "enabled"
+      && normalizedThinking.budget_tokens >= resolvedMaxTokens
     ) {
       throw new HttpStatusError(
         400,
@@ -2214,7 +2238,7 @@ async function handleAnthropicMessages(req: Request, res: Response) {
       max_tokens: resolvedMaxTokens,
       messages,
       ...(system ? { system } : {}),
-      ...(effectiveThinking ? { thinking: effectiveThinking } : {}),
+      ...(normalizedThinking ? { thinking: normalizedThinking } : {}),
       ...rest,
     } as Parameters<typeof client.messages.create>[0];
 
@@ -3018,12 +3042,14 @@ async function handleClaude({
 
   let thinkingParam:
     | {}
-    | { thinking: { type: "adaptive" } }
-    | { thinking: { type: "enabled"; budget_tokens: number } } = {};
+    | { thinking: { type: "adaptive"; display?: "summarized" | "omitted" } }
+    | { thinking: { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" } } = {};
 
   if (thinking) {
     if (CLAUDE_ADAPTIVE_THINKING_MODELS.has(model)) {
-      thinkingParam = { thinking: { type: "adaptive" } };
+      thinkingParam = {
+        thinking: normalizeClaudeThinkingDisplay(model, { type: "adaptive" }),
+      };
     } else {
       if (maxTokens <= CLAUDE_MIN_THINKING_BUDGET) {
         throw new HttpStatusError(
@@ -3045,7 +3071,10 @@ async function handleClaude({
       }
 
       thinkingParam = {
-        thinking: { type: "enabled", budget_tokens: budgetTokens },
+        thinking: normalizeClaudeThinkingDisplay(model, {
+          type: "enabled",
+          budget_tokens: budgetTokens,
+        }),
       };
     }
   }
