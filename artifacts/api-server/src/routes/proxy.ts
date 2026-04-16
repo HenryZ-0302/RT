@@ -27,18 +27,21 @@ const OPENAI_IMAGE_MODELS = [
 ];
 
 const ANTHROPIC_BASE_MODELS = [
+  "claude-opus-4-7",
   "claude-opus-4-6", "claude-opus-4-5", "claude-opus-4-1",
   "claude-sonnet-4-6", "claude-sonnet-4-5",
   "claude-haiku-4-5",
 ];
 
 const CLAUDE_ADAPTIVE_THINKING_MODELS = new Set<string>([
+  "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
 ]);
 const CLAUDE_DEFAULT_THINKING_BUDGET = 16000;
 const CLAUDE_MIN_THINKING_BUDGET = 1024;
 const CLAUDE_MODEL_MAX: Record<string, number> = {
+  "claude-opus-4-7": 64000,
   "claude-haiku-4-5": 8096,
   "claude-sonnet-4-5": 64000,
   "claude-sonnet-4-6": 64000,
