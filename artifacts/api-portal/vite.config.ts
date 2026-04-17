@@ -55,14 +55,6 @@ export default defineConfig({
         target: apiProxyTarget,
         changeOrigin: true,
       },
-      "/v1": {
-        target: apiProxyTarget,
-        changeOrigin: true,
-      },
-      "/v1beta": {
-        target: apiProxyTarget,
-        changeOrigin: true,
-      },
     },
     fs: {
       strict: true,
