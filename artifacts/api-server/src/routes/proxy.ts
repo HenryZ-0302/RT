@@ -145,6 +145,42 @@ function sanitizeAnthropicNativeValue(value: unknown): unknown {
   return value;
 }
 
+function sanitizeAnthropicNativeMessages(messages: unknown): AnthropicMessage[] {
+  if (!Array.isArray(messages)) return [];
+
+  return messages
+    .map((message) => {
+      if (!message || typeof message !== "object") return null;
+      const entry = message as Record<string, unknown>;
+      const role = entry.role === "assistant" ? "assistant" : "user";
+      const content = entry.content;
+
+      if (typeof content === "string") {
+        return { role, content };
+      }
+
+      if (!Array.isArray(content)) {
+        return { role, content: "" };
+      }
+
+      const filteredContent = content.filter((part) => {
+        if (!part || typeof part !== "object") return false;
+        const item = part as Record<string, unknown>;
+        const type = typeof item.type === "string" ? item.type : "";
+        if ((type === "thinking" || type === "redacted_thinking") && typeof item.signature !== "string") {
+          return false;
+        }
+        return true;
+      }) as AnthropicContentPart[];
+
+      return {
+        role,
+        content: filteredContent,
+      };
+    })
+    .filter((message): message is AnthropicMessage => message !== null);
+}
+
 const REGISTERED_MODELS: RegisteredModel[] = [
   ...OPENAI_CHAT_MODELS.map((id) => ({
     id,
@@ -2163,9 +2199,9 @@ router.post(/^\/v1beta\/models\/([^:]+):countTokens$/, requireApiKey, async (req
 // ---------------------------------------------------------------------------
 
 async function handleAnthropicMessages(req: Request, res: Response) {
-  const body = sanitizeAnthropicNativeValue(req.body) as {
+  const rawBody = sanitizeAnthropicNativeValue(req.body) as {
     model?: string;
-    messages: AnthropicMessage[];
+    messages: unknown;
     system?: string | { type: string; text: string }[];
     stream?: boolean;
     max_tokens?: number;
@@ -2174,6 +2210,10 @@ async function handleAnthropicMessages(req: Request, res: Response) {
       | { type: "adaptive"; display?: "summarized" | "omitted" }
       | { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" };
     [key: string]: unknown;
+  };
+  const body = {
+    ...rawBody,
+    messages: sanitizeAnthropicNativeMessages(rawBody.messages),
   };
 
   const { model, messages, system, stream, max_tokens, thinking, ...rest } = body;
