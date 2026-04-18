@@ -1,30 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Activity, CheckCircle2, Copy, Loader2, Settings, X } from "lucide-react";
 import { SERVICE_KEY_ENV, servicePaths } from "../lib/service";
-import { Check, Copy, Settings, X, Bot, Activity } from "lucide-react";
 import { cn } from "../lib/utils";
 
 interface Props {
   baseUrl: string;
   onComplete: (apiKey?: string) => void;
   onDismiss: () => void;
-}
-
-interface CopyBlock {
-  text: string;
-}
-
-interface Action {
-  label: string;
-  value: string;
-  primary?: boolean;
-}
-
-interface Message {
-  id: number;
-  from: "agent" | "user";
-  text: string;
-  copyBlocks?: CopyBlock[];
-  actions?: Action[];
 }
 
 interface SetupStatus {
@@ -34,17 +16,19 @@ interface SetupStatus {
 }
 
 function buildSetupPrompt(
-  apiKey: string,
-  options: { needIntegrations: boolean; needStorage: boolean } = { needIntegrations: true, needStorage: true },
+  apiKey: string | null,
+  options: { needKey: boolean; needIntegrations: boolean; needStorage: boolean },
 ): string {
   const steps: string[] = [];
   let step = 0;
 
-  steps.push(
-    `步骤 ${++step}：写入服务访问密钥\n` +
-    `请在平台 Secrets 中创建如下键值，并保持原样：\n` +
-    `${SERVICE_KEY_ENV} = ${apiKey}`,
-  );
+  if (options.needKey && apiKey) {
+    steps.push(
+      `步骤 ${++step}：写入服务访问密钥\n` +
+      `请在平台 Secrets 中创建如下键值，并保持原样：\n` +
+      `${SERVICE_KEY_ENV} = ${apiKey}`,
+    );
+  }
 
   if (options.needIntegrations) {
     steps.push(
@@ -86,17 +70,10 @@ const STORAGE_ONLY_PROMPT =
   `console.log(JSON.stringify(result));\n\n` +
   `完成后重启 "artifacts/api-server: API Server" 和 "artifacts/api-portal: web"。`;
 
-let msgId = 0;
-const makeMessage = (
-  from: Message["from"],
-  text: string,
-  extras: Partial<Omit<Message, "id" | "from" | "text">> = {},
-): Message => ({ id: ++msgId, from, text, ...extras });
-
 function CopyableBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
-  const copy = () => {
+  const handleCopy = () => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -104,304 +81,212 @@ function CopyableBlock({ text }: { text: string }) {
   };
 
   return (
-    <div className="bg-zinc-950 border border-indigo-500/30 rounded-lg p-3 my-2 flex shadow-inner group">
-      <span className="flex-1 text-indigo-300 text-xs font-mono whitespace-pre-wrap select-all leading-relaxed pr-4">
+    <div className="rounded-xl border border-border/60 bg-secondary/40 p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="text-xs font-medium text-muted-foreground">复制给平台 Agent</div>
+        <button
+          onClick={handleCopy}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+            copied
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+              : "border-border bg-background hover:bg-secondary",
+          )}
+        >
+          <Copy size={12} />
+          {copied ? "已复制" : "复制"}
+        </button>
+      </div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-950 p-3 text-xs leading-relaxed text-zinc-200">
         {text}
+      </pre>
+    </div>
+  );
+}
+
+function StatusItem({ label, ready }: { label: string; ready: boolean }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border/60 bg-secondary/30 px-3 py-2">
+      <span className="text-sm">{label}</span>
+      <span className={cn("text-xs font-medium", ready ? "text-emerald-500" : "text-amber-500")}>
+        {ready ? "已完成" : "待处理"}
       </span>
-      <button
-        onClick={copy}
-        className={cn(
-          "flex items-center justify-center gap-1.5 self-start px-3 py-1.5 rounded-md border text-xs font-bold transition-all shadow-sm",
-          copied 
-            ? "border-green-500/40 bg-green-500/10 text-green-500" 
-            : "border-indigo-500/40 bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500/20"
-        )}
-      >
-        {copied ? <Check size={14} /> : <Copy size={14} />}
-        {copied ? "已复制" : "复制"}
-      </button>
     </div>
   );
 }
 
 export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [typing, setTyping] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [keyInputStep, setKeyInputStep] = useState(false);
-  const [keyInputValue, setKeyInputValue] = useState("");
-  const [chosenKey, setChosenKey] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [keyInput, setKeyInput] = useState("");
+  const [chosenKey, setChosenKey] = useState<string | null>(null);
 
-  const addAgent = useCallback((text: string, extras: Partial<Omit<Message, "id" | "from" | "text">> = {}, delay = 300) => {
-    setTyping(true);
-    setTimeout(() => {
-      setTyping(false);
-      setMessages((prev) => [...prev, makeMessage("agent", text, extras)]);
-    }, delay);
-  }, []);
-
-  const addUser = useCallback((text: string) => {
-    setMessages((prev) => [...prev, makeMessage("user", text)]);
-  }, []);
-
-  const clearActions = useCallback(() => {
-    setMessages((prev) => prev.map((message) => ({ ...message, actions: undefined })));
-  }, []);
-
-  const checkSetupStatus = useCallback(async (): Promise<SetupStatus> => {
+  const checkSetupStatus = useCallback(async () => {
+    setChecking(true);
     try {
       const response = await fetch(servicePaths.bootstrap(baseUrl), {
         signal: AbortSignal.timeout(8000),
       });
-      if (!response.ok) return { configured: false, integrationsReady: false, storageReady: false };
-      return (await response.json()) as SetupStatus;
+      if (!response.ok) {
+        setStatus({ configured: false, integrationsReady: false, storageReady: false });
+        return;
+      }
+      setStatus(await response.json() as SetupStatus);
     } catch {
-      return { configured: false, integrationsReady: false, storageReady: false };
+      setStatus({ configured: false, integrationsReady: false, storageReady: false });
+    } finally {
+      setChecking(false);
     }
   }, [baseUrl]);
 
-  const runCheck = useCallback(async () => {
-    clearActions();
-    setChecking(true);
-    addUser("检查当前配置");
-    addAgent("正在检查服务当前的初始化状态...", {}, 200);
+  useEffect(() => {
+    void checkSetupStatus();
+  }, [checkSetupStatus]);
 
-    const status = await checkSetupStatus();
-    setChecking(false);
-    setMessages((prev) => prev.filter((message) => message.text !== "正在检查服务当前的初始化状态..."));
-
-    if (status.configured && status.integrationsReady && status.storageReady) {
-      addAgent(
-        "配置已经完成。\n\n你现在可以直接使用统一服务层门户；如果你刚刚重启过工作流，也可以点击“完成”返回首页。",
-        { actions: [{ label: "完成", value: "finish", primary: true }] },
-      );
-      return;
-    }
-
+  const prompt = useMemo(() => {
+    if (!status) return "";
     if (status.configured && status.integrationsReady && !status.storageReady) {
-      addAgent(
-        "访问密钥和平台集成都已经就绪，现在只差云端持久化存储。\n\n请把下面的指令发给平台 Agent，执行完成后再回来重新检测。",
-        {
-          copyBlocks: [{ text: STORAGE_ONLY_PROMPT }],
-          actions: [{ label: "我已重启，重新检测", value: "check", primary: true }],
-        },
-      );
-      return;
+      return STORAGE_ONLY_PROMPT;
     }
 
-    if (chosenKey) {
-      addAgent(
-        "服务还没有完成全部初始化。\n\n我已经根据当前状态生成了最短的补全指令，你可以直接复制给平台 Agent。",
-        {
-          copyBlocks: [{
-            text: buildSetupPrompt(chosenKey, {
-              needIntegrations: !status.integrationsReady,
-              needStorage: !status.storageReady,
-            }),
-          }],
-          actions: [{ label: "我已重启，重新检测", value: "check", primary: true }],
-        },
-      );
-      return;
-    }
+    const needKey = !status.configured;
+    if (needKey && !chosenKey) return "";
 
-    addAgent(
-      "检测到服务还没有完成初始化。\n\n先设置一个服务访问密钥，我会立即为你生成完整配置指令。",
-      { actions: [{ label: "开始配置", value: "start", primary: true }] },
-    );
-  }, [addAgent, addUser, checkSetupStatus, chosenKey, clearActions]);
+    return buildSetupPrompt(chosenKey, {
+      needKey,
+      needIntegrations: !status.integrationsReady,
+      needStorage: !status.storageReady,
+    });
+  }, [chosenKey, status]);
 
-  const handleKeySubmit = useCallback(() => {
-    const key = keyInputValue.trim();
-    if (!key) return;
+  const handleKeyConfirm = () => {
+    const value = keyInput.trim();
+    if (!value) return;
+    setChosenKey(value);
+  };
 
-    setChosenKey(key);
-    setKeyInputStep(false);
-    addUser("已设置服务访问密钥");
-    clearActions();
-    addAgent(
-      "我已经记录好你的服务访问密钥。\n\n请把下面的指令完整复制后发送给平台 Agent。完成后重启工作流，再回来点“重新检测”。",
-      {
-        copyBlocks: [{ text: buildSetupPrompt(key) }],
-        actions: [{ label: "我已重启，重新检测", value: "check", primary: true }],
-      },
-    );
-  }, [addAgent, addUser, clearActions, keyInputValue]);
-
-  const handleAction = useCallback((value: string, label: string) => {
-    clearActions();
-
-    if (value === "start") {
-      addUser(label);
-      setKeyInputStep(true);
-      addAgent("请输入一个你自己定义的服务访问密钥。这个值会写入 SERVICE_ACCESS_KEY。");
-      return;
-    }
-
-    if (value === "already_done" || value === "check") {
-      void runCheck();
-      return;
-    }
-
-    if (value === "finish") {
-      onComplete(chosenKey || undefined);
-    }
-  }, [addAgent, addUser, chosenKey, clearActions, onComplete, runCheck]);
-
-  useEffect(() => {
-    setTimeout(() => {
-      setMessages([
-        makeMessage(
-          "agent",
-          "我是初始化助手。\n\n这个门户已经切换成统一服务层的中立包装，底层服务具备完整负载均衡与路由能力等待配置。\n\n首次运行时，需要确认服务访问密钥、平台集成和基础环境是否就绪。",
-          {
-            actions: [
-              { label: "开始配置", value: "start", primary: true },
-              { label: "我已经配置过", value: "already_done" },
-            ],
-          },
-        ),
-      ]);
-    }, 200);
-  }, []);
-
-  useEffect(() => {
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
-  }, [messages, typing]);
+  const isComplete = !!status?.configured && !!status.integrationsReady && !!status.storageReady;
+  const showKeyStep = !!status && !status.configured;
+  const showPrompt = !!status && !isComplete && (!!prompt || (showKeyStep && !!chosenKey));
 
   return (
-    <div className="fixed inset-0 z-[1000] bg-background/80 flex items-center justify-center p-4 backdrop-blur-md">
-      <div className="w-full max-w-lg h-[min(640px,88vh)] flex flex-col bg-card border border-border/60 rounded-2xl shadow-2xl shadow-black/20 overflow-hidden transform transition-all duration-300 animate-in fade-in zoom-in-95">
-        
-        {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b bg-secondary/50 flex-shrink-0">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-sm ring-2 ring-indigo-500/20">
-             <Settings size={18} />
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-background/80 p-4 backdrop-blur-md">
+      <div className="w-full max-w-2xl rounded-2xl border border-border/60 bg-card shadow-2xl shadow-black/20">
+        <div className="flex items-center gap-3 border-b px-5 py-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Settings size={18} />
           </div>
-          <div>
-            <h3 className="font-bold text-[14px]">服务初始化助手</h3>
-            <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-medium tracking-wide">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-              就绪
-            </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">启动配置向导</h3>
+            <p className="text-xs text-muted-foreground">按缺失项补齐服务初始化</p>
           </div>
-          
-          <div className="ml-auto flex items-center gap-4">
-             {checking && (
-               <div className="flex items-center gap-1.5 text-xs text-indigo-500 font-medium">
-                  <Activity size={12} className="animate-spin" /> 检测中...
-               </div>
-             )}
-            <button
-              onClick={onDismiss}
-              className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground transition-colors"
-            >
-              <X size={18} />
-            </button>
-          </div>
+          <button
+            onClick={onDismiss}
+            className="ml-auto rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4 bg-background">
-          {messages.map((message) => (
-            <div key={message.id} className="flex flex-col gap-2">
-              <div className={cn(
-                "flex items-end gap-3",
-                message.from === 'agent' ? "justify-start" : "justify-end"
-              )}>
-                {message.from === "agent" && (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-sm flex-shrink-0 mb-1">
-                     <Bot size={16} />
-                  </div>
-                )}
-                
-                <div className={cn(
-                  "max-w-[85%] px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap shadow-sm",
-                  message.from === "agent" 
-                    ? "rounded-2xl rounded-bl-sm bg-secondary border border-border/60 text-foreground" 
-                    : "rounded-2xl rounded-br-sm bg-primary border border-primary text-primary-foreground"
-                )}>
-                   {message.text}
-                   {message.copyBlocks?.map((block, index) => (
-                     <CopyableBlock key={`${message.id}-${index}`} text={block.text} />
-                   ))}
-                </div>
+        <div className="space-y-5 p-5">
+          <div className="rounded-xl border border-border/60 bg-secondary/20 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">当前状态</div>
+                <div className="text-xs text-muted-foreground">先检测，再只处理缺失项。</div>
               </div>
-
-              {message.actions && (
-                <div className="flex flex-wrap gap-2 pl-11">
-                  {message.actions.map((action) => (
-                    <button
-                      key={action.value}
-                      onClick={() => handleAction(action.value, action.label)}
-                      disabled={checking}
-                      className={cn(
-                        "px-4 py-2 rounded-full text-[13px] font-semibold transition-all shadow-sm",
-                        action.primary 
-                          ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20" 
-                          : "bg-secondary text-secondary-foreground border border-border/60 hover:bg-secondary/80",
-                        checking && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      {action.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button
+                onClick={() => void checkSetupStatus()}
+                disabled={checking}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+              >
+                {checking ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
+                重新检测
+              </button>
             </div>
-          ))}
 
-          {typing && (
-            <div className="flex items-end gap-3">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-sm flex-shrink-0 opacity-50">
-                <Bot size={16} />
+            {checking || !status ? (
+              <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-3 text-sm text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                正在检查服务状态...
               </div>
-              <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-secondary border border-border flex items-center gap-1.5 h-[42px]">
-                {[0, 1, 2].map((index) => (
-                  <div
-                    key={index}
-                    className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce"
-                    style={{ animationDelay: `${index * 0.15}s` }}
-                  />
-                ))}
+            ) : (
+              <div className="space-y-2">
+                <StatusItem label="服务访问密钥" ready={status.configured} />
+                <StatusItem label="平台集成" ready={status.integrationsReady} />
+                <StatusItem label="云端存储" ready={status.storageReady} />
               </div>
+            )}
+          </div>
+
+          {isComplete && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-emerald-500">
+                <CheckCircle2 size={16} />
+                <span className="text-sm font-medium">服务已配置完成</span>
+              </div>
+              <p className="text-sm text-muted-foreground">无需额外操作，直接返回登录即可。</p>
             </div>
           )}
-          <div ref={bottomRef} />
-        </div>
 
-        {/* Input Area */}
-        {keyInputStep ? (
-          <div className="p-4 border-t bg-indigo-500/5 dark:bg-indigo-500/10 border-indigo-500/20 flex-shrink-0">
-             <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5">
-               自定义一个用于接口调用的凭据 (如 <code className="bg-indigo-500/10 text-indigo-500 px-1 py-0.5 rounded">my-secure-key-123</code>)
-             </div>
-             <div className="flex gap-2">
+          {showKeyStep && !chosenKey && (
+            <div className="rounded-xl border border-border/60 bg-secondary/20 p-4">
+              <div className="mb-2 text-sm font-medium">步骤 1：设置服务访问密钥</div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                先定义一个门户登录和接口调用共用的访问密码，后面会直接写进 {SERVICE_KEY_ENV}。
+              </p>
+              <div className="flex gap-2">
                 <input
                   autoFocus
                   type="text"
-                  value={keyInputValue}
-                  onChange={(event) => setKeyInputValue(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === "Enter") handleKeySubmit(); }}
+                  value={keyInput}
+                  onChange={(event) => setKeyInput(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") handleKeyConfirm(); }}
                   placeholder="输入你定义的服务访问密钥"
-                  className="flex-1 px-4 py-2 bg-background border border-indigo-500/30 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none rounded-lg text-sm font-mono transition-shadow shadow-inner text-foreground"
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
                 />
                 <button
-                  onClick={handleKeySubmit}
-                  disabled={!keyInputValue.trim()}
-                  className="px-5 py-2 bg-indigo-500 text-white font-bold text-sm rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm min-w-[80px]"
+                  onClick={handleKeyConfirm}
+                  disabled={!keyInput.trim()}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   确认
                 </button>
-             </div>
-          </div>
-        ) : (
-          <div className="py-2.5 text-center text-[11px] text-muted-foreground border-t bg-secondary/30 flex-shrink-0 select-none">
-            初始化由平台 Agent 执行，向导仅协助您生成并传递指令
-          </div>
-        )}
+              </div>
+            </div>
+          )}
 
+          {showPrompt && (
+            <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/20 p-4">
+              <div>
+                <div className="text-sm font-medium">步骤 {showKeyStep ? "2" : "1"}：执行补全配置</div>
+                <p className="text-xs text-muted-foreground">
+                  把下面整段指令发给平台 Agent。执行并重启工作流后，再点上面的“重新检测”。
+                </p>
+              </div>
+              <CopyableBlock text={prompt} />
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t bg-secondary/20 px-5 py-4">
+          <div className="text-xs text-muted-foreground">向导只负责检测状态和生成操作指令。</div>
+          <div className="flex gap-2">
+            <button
+              onClick={onDismiss}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm transition-colors hover:bg-secondary"
+            >
+              关闭
+            </button>
+            <button
+              onClick={() => onComplete(chosenKey ?? undefined)}
+              disabled={!isComplete}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              完成
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
