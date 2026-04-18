@@ -82,24 +82,21 @@ function CopyableBlock({ text }: { text: string }) {
 
   return (
     <div className="rounded-xl border border-border/60 bg-secondary/40 p-3">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-xs font-medium text-muted-foreground">复制给平台 Agent</div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-muted-foreground">已生成配置指令，直接复制后发给平台 Agent。</div>
         <button
           onClick={handleCopy}
           className={cn(
-            "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+            "inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
             copied
               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
               : "border-border bg-background hover:bg-secondary",
           )}
         >
           <Copy size={12} />
-          {copied ? "已复制" : "复制"}
+          {copied ? "已复制" : "复制指令"}
         </button>
       </div>
-      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-950 p-3 text-xs leading-relaxed text-zinc-200">
-        {text}
-      </pre>
     </div>
   );
 }
