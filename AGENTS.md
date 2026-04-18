@@ -4,7 +4,10 @@ This file applies to the whole repository.
 
 ## Replit update/install workflow
 
-When updating or installing this project from the `mask_min` branch:
+When installing or updating this project:
+
+- Use the repository URL, branch, or commit explicitly provided by the user.
+- If the user is asking for an update and does not specify a new source, continue using the same repository source the project was originally installed from.
 
 1. Pull the latest repository code and fully replace business code in the current project.
 2. Preserve Replit local/platform-generated files and directories. Do not overwrite or delete local environment-only configuration.
