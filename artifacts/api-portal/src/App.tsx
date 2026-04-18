@@ -34,6 +34,7 @@ export default function App() {
   const [gateUnlocked, setGateUnlocked] = useState(false);
   const [gateLoading, setGateLoading] = useState(false);
   const [gateError, setGateError] = useState("");
+  const [wizardChecking, setWizardChecking] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [stats, setStats] = useState<Record<string, BackendStat> | null>(null);
   const [modelStats, setModelStats] = useState<Record<string, ModelStat> | null>(null);
@@ -137,6 +138,28 @@ export default function App() {
       setGateLoading(false);
     }
   }, [applyMetricsPayload, baseUrl]);
+
+  const openSetupWizard = useCallback(async () => {
+    setWizardChecking(true);
+    setGateError("");
+    try {
+      const response = await fetch(servicePaths.bootstrap(baseUrl), {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (response.ok) {
+        const status = await response.json() as { configured?: boolean; integrationsReady?: boolean; storageReady?: boolean };
+        if (status.configured && status.integrationsReady && status.storageReady) {
+          setGateError("服务已配置完成，无需操作，直接登录即可。");
+          return;
+        }
+      }
+      setShowWizard(true);
+    } catch {
+      setShowWizard(true);
+    } finally {
+      setWizardChecking(false);
+    }
+  }, [baseUrl]);
 
   const fetchStats = useCallback(async (key: string) => {
     if (!key) { setStats(null); setModelStats(null); setStatsError(false); return; }
@@ -335,7 +358,7 @@ export default function App() {
               <div className="mb-5">
                 <input
                   type="password"
-                  placeholder="SERVICE_ACCESS_KEY"
+                  placeholder="请输入服务访问密码"
                   value={gateKey}
                   onChange={(e) => setGateKey(e.target.value)}
                   className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-center font-mono focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-sm mb-2"
@@ -354,10 +377,11 @@ export default function App() {
             <div className="mt-8 text-center border-t border-border/50 pt-5">
               <span className="text-xs text-muted-foreground">初次部署？</span>
               <button 
-                onClick={() => setShowWizard(true)}
+                onClick={() => void openSetupWizard()}
+                disabled={wizardChecking}
                 className="ml-2 text-xs font-semibold text-primary/80 hover:text-primary transition-colors underline underline-offset-2"
               >
-                启动配置向导
+                {wizardChecking ? "检测中..." : "启动配置向导"}
               </button>
             </div>
           </div>
