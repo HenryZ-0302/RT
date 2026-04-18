@@ -36,6 +36,16 @@ function json(data: unknown, init: ResponseInit = {}): Response {
   });
 }
 
+function html(content: string, init: ResponseInit = {}): Response {
+  return new Response(content, {
+    ...init,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      ...init.headers,
+    },
+  });
+}
+
 function getBearer(request: Request): string {
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -68,6 +78,328 @@ function sanitizeAccountInput(payload: AccountInput): AccountRecord {
   };
 }
 
+function renderAdminPage(): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RT Account Router</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0b1020;
+      --card: #11182d;
+      --muted: #8b96b2;
+      --line: #26304a;
+      --text: #eef2ff;
+      --accent: #5b8cff;
+      --accent-2: #2bd4a8;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #0b1020, #0f1530);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 32px 20px 80px;
+    }
+    .top {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.2fr 0.8fr;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: rgba(17, 24, 45, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.2);
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    h2 { font-size: 16px; margin-bottom: 14px; }
+    p.sub { color: var(--muted); line-height: 1.55; }
+    .field, .grid { display: grid; gap: 10px; }
+    .grid.two { grid-template-columns: 1fr 1fr; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #0b1122;
+      color: var(--text);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font: inherit;
+    }
+    textarea { min-height: 96px; resize: vertical; }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font: inherit;
+      cursor: pointer;
+      color: white;
+      background: var(--accent);
+    }
+    button.secondary { background: #22304f; }
+    button.ghost { background: transparent; border: 1px solid var(--line); }
+    button.danger { background: var(--danger); }
+    .list { display: grid; gap: 12px; margin-top: 18px; }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      background: rgba(8, 13, 28, 0.6);
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .tag {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .tag.ok { color: var(--accent-2); border-color: rgba(43, 212, 168, 0.4); }
+    .tag.off { color: #ffb86b; border-color: rgba(255, 184, 107, 0.35); }
+    .muted { color: var(--muted); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .status {
+      margin-top: 12px;
+      font-size: 13px;
+      color: var(--muted);
+      min-height: 18px;
+    }
+    @media (max-width: 860px) {
+      .top, .grid.two { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <section class="card">
+        <h1>RT Account Router</h1>
+        <p class="sub">这里只管理多账号轮询。账号加进去后，Worker 会按轮询顺序转发 <span class="mono">/v1/*</span> 请求，5xx 或网络错误时自动切下一个账号。</p>
+      </section>
+      <section class="card">
+        <h2>访问令牌</h2>
+        <div class="field">
+          <input id="token" type="password" placeholder="输入 AUTH_TOKEN" />
+          <button id="save-token">保存并刷新</button>
+        </div>
+        <div class="status" id="status"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>添加账号</h2>
+      <div class="grid two">
+        <input id="id" placeholder="账号 ID，例如 openai-1" />
+        <input id="label" placeholder="显示名称，可留空" />
+      </div>
+      <div class="grid two" style="margin-top:10px">
+        <input id="baseUrl" placeholder="上游 Base URL，例如 https://api.openai.com" />
+        <input id="apiKey" placeholder="上游 API Key" />
+      </div>
+      <div class="grid" style="margin-top:10px">
+        <textarea id="extraHeaders" placeholder='可选额外请求头 JSON，例如 {"OpenAI-Organization":"org_xxx"}'></textarea>
+      </div>
+      <div class="actions">
+        <button id="add-account">添加 / 覆盖账号</button>
+        <button class="secondary" id="reload">刷新列表</button>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:20px">
+      <div class="row">
+        <div>
+          <h2>账号列表</h2>
+          <p class="sub">这里只显示已保存账号，不暴露 API Key。</p>
+        </div>
+      </div>
+      <div class="list" id="accounts"></div>
+    </section>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const listEl = document.getElementById("accounts");
+    const tokenInput = document.getElementById("token");
+    tokenInput.value = localStorage.getItem("rt-router-token") || "";
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message || "";
+      statusEl.style.color = isError ? "#ff8f8f" : "#8b96b2";
+    }
+
+    function getToken() {
+      return tokenInput.value.trim();
+    }
+
+    function headers() {
+      const token = getToken();
+      return {
+        "content-type": "application/json",
+        "authorization": "Bearer " + token,
+      };
+    }
+
+    function parseExtraHeaders() {
+      const raw = document.getElementById("extraHeaders").value.trim();
+      if (!raw) return undefined;
+      return JSON.parse(raw);
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          ...(options.headers || {}),
+          authorization: "Bearer " + getToken(),
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || ("HTTP " + response.status));
+      }
+      return data;
+    }
+
+    function renderAccounts(accounts) {
+      if (!accounts.length) {
+        listEl.innerHTML = '<div class="muted">暂无账号。</div>';
+        return;
+      }
+      listEl.innerHTML = accounts.map((account) => {
+        const headers = Object.keys(account.extraHeaders || {});
+        return \`
+          <article class="item">
+            <div class="row">
+              <div>
+                <h3>\${account.label}</h3>
+                <div class="muted mono" style="margin-top:6px">\${account.baseUrl}</div>
+              </div>
+              <div class="actions" style="margin-top:0">
+                <button class="secondary" onclick="toggleAccount('\${account.id}', \${!account.enabled})">\${account.enabled ? "停用" : "启用"}</button>
+                <button class="danger" onclick="removeAccount('\${account.id}')">删除</button>
+              </div>
+            </div>
+            <div class="meta">
+              <span class="tag">\${account.id}</span>
+              <span class="tag \${account.enabled ? "ok" : "off"}">\${account.enabled ? "启用中" : "已停用"}</span>
+              <span class="tag">\${headers.length ? ("额外请求头 " + headers.length) : "无额外请求头"}</span>
+              <span class="tag">\${account.unhealthyUntil && account.unhealthyUntil > Date.now() ? "冷却中" : "可参与轮询"}</span>
+            </div>
+          </article>
+        \`;
+      }).join("");
+    }
+
+    async function loadAccounts() {
+      try {
+        setStatus("正在加载账号列表...");
+        const data = await api("/admin/accounts");
+        renderAccounts(data.accounts || []);
+        setStatus("账号列表已刷新。");
+      } catch (error) {
+        renderAccounts([]);
+        setStatus(error.message, true);
+      }
+    }
+
+    async function addAccount() {
+      try {
+        const payload = {
+          id: document.getElementById("id").value.trim(),
+          label: document.getElementById("label").value.trim(),
+          baseUrl: document.getElementById("baseUrl").value.trim(),
+          apiKey: document.getElementById("apiKey").value.trim(),
+          enabled: true,
+          extraHeaders: parseExtraHeaders(),
+        };
+        await api("/admin/accounts", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setStatus("账号已保存。");
+        document.getElementById("apiKey").value = "";
+        await loadAccounts();
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    async function toggleAccount(id, enabled) {
+      try {
+        await api("/admin/accounts/" + encodeURIComponent(id), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        });
+        setStatus(enabled ? "账号已启用。" : "账号已停用。");
+        await loadAccounts();
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    async function removeAccount(id) {
+      if (!confirm("确认删除这个账号？")) return;
+      try {
+        await api("/admin/accounts/" + encodeURIComponent(id), { method: "DELETE" });
+        setStatus("账号已删除。");
+        await loadAccounts();
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    window.toggleAccount = toggleAccount;
+    window.removeAccount = removeAccount;
+
+    document.getElementById("save-token").addEventListener("click", () => {
+      localStorage.setItem("rt-router-token", getToken());
+      loadAccounts();
+    });
+    document.getElementById("add-account").addEventListener("click", addAccount);
+    document.getElementById("reload").addEventListener("click", loadAccounts);
+
+    if (getToken()) {
+      loadAccounts();
+    } else {
+      renderAccounts([]);
+      setStatus("先输入 AUTH_TOKEN 再加载。");
+    }
+  </script>
+</body>
+</html>`;
+}
+
 function redactAccount(account: AccountRecord) {
   return {
     id: account.id,
@@ -89,8 +421,12 @@ async function readJsonBody<T>(request: Request): Promise<T> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (new URL(request.url).pathname === "/health") {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === "/health") {
       return json({ ok: true });
+    }
+    if (pathname === "/" || pathname === "/admin/ui") {
+      return html(renderAdminPage());
     }
     const stub = env.ROUTER_STATE.getByName("router");
     return stub.fetch(request);

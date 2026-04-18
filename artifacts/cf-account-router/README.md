@@ -9,6 +9,21 @@ It does **not** do provider/model translation. It simply:
 - forwards the original `/v1/*` request to that account
 - retries another account when the selected one returns a network error or 5xx
 
+## Built-in admin UI
+
+After deploy, open:
+
+- `/`
+- or `/admin/ui`
+
+The page lets you:
+
+- save `AUTH_TOKEN` locally in the browser
+- add/update accounts
+- enable/disable accounts
+- delete accounts
+- inspect current router state
+
 ## Required secrets
 
 Set these in Cloudflare:
