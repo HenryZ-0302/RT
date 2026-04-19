@@ -1,6 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { type GoogleGenAI } from "@google/genai";
+import { parseRequestBody } from "../lib/validation";
 import { requireApiKey } from "../middleware/auth";
+import { geminiNativeGenerateContentBodySchema } from "../schemas/gemini";
 import { type Backend } from "../services/backendPool";
 import { handleFriendJsonProxy, handleFriendSseProxy } from "../services/friendProxy";
 import { GEMINI_BASE_MODELS, isModelEnabled } from "../services/modelRegistry";
@@ -99,7 +101,8 @@ export function createGeminiRouter(deps: {
   }
 
   async function handleGeminiNativeGenerateContent(req: Request, res: Response) {
-    const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
+    const body = parseRequestBody(res, geminiNativeGenerateContentBodySchema, req.body) as GeminiNativeGenerateContentRequest | null;
+    if (!body) return;
     const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
     const startTime = Date.now();
     let backend = deps.pickBackend();
@@ -186,7 +189,8 @@ export function createGeminiRouter(deps: {
   }
 
   async function handleGeminiNativeStreamGenerateContent(req: Request, res: Response) {
-    const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
+    const body = parseRequestBody(res, geminiNativeGenerateContentBodySchema, req.body) as GeminiNativeGenerateContentRequest | null;
+    if (!body) return;
     const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
     const startTime = Date.now();
     let backend = deps.pickBackend();
@@ -274,7 +278,8 @@ export function createGeminiRouter(deps: {
   }
 
   async function handleGeminiNativeCountTokens(req: Request, res: Response) {
-    const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
+    const body = parseRequestBody(res, geminiNativeGenerateContentBodySchema, req.body) as GeminiNativeGenerateContentRequest | null;
+    if (!body) return;
     const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
     const startTime = Date.now();
     let backend = deps.pickBackend();

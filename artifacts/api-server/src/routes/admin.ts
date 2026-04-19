@@ -1,5 +1,13 @@
 import { Router, type IRouter, type Request, type Response } from "express";
+import { parseRequestBody } from "../lib/validation";
 import { requireApiKey, requireApiKeyWithQuery } from "../middleware/auth";
+import {
+  batchUpdateBackendsBodySchema,
+  createBackendBodySchema,
+  updateBackendBodySchema,
+  updateModelsBodySchema,
+  updateRoutingBodySchema,
+} from "../schemas/admin";
 import {
   type RoutingSettings,
   batchUpdateDynamicBackends,
@@ -85,11 +93,9 @@ export function createAdminRouter(deps: {
   }
 
   function createBackend(req: Request, res: Response) {
-    const { url } = req.body as { url?: string };
-    if (!url || typeof url !== "string" || !url.startsWith("http")) {
-      res.status(400).json({ error: "Valid https URL required" });
-      return;
-    }
+    const body = parseRequestBody(res, createBackendBodySchema, req.body);
+    if (!body) return;
+    const { url } = body;
 
     try {
       res.json(createDynamicBackend(url));
@@ -111,11 +117,9 @@ export function createAdminRouter(deps: {
 
   function updateBackend(req: Request, res: Response) {
     const { label } = req.params;
-    const { enabled } = req.body as { enabled?: boolean };
-    if (typeof enabled !== "boolean") {
-      res.status(400).json({ error: "enabled (boolean) required" });
-      return;
-    }
+    const body = parseRequestBody(res, updateBackendBodySchema, req.body);
+    if (!body) return;
+    const { enabled } = body;
 
     const target = updateDynamicBackend(label, enabled);
     if (!target) {
@@ -127,11 +131,9 @@ export function createAdminRouter(deps: {
   }
 
   function batchUpdateBackends(req: Request, res: Response) {
-    const { labels, enabled } = req.body as { labels?: string[]; enabled?: boolean };
-    if (!Array.isArray(labels) || typeof enabled !== "boolean") {
-      res.status(400).json({ error: "labels (string[]) and enabled (boolean) required" });
-      return;
-    }
+    const body = parseRequestBody(res, batchUpdateBackendsBodySchema, req.body);
+    if (!body) return;
+    const { labels, enabled } = body;
 
     const updated = batchUpdateDynamicBackends(labels, enabled);
     res.json({ updated, enabled });
@@ -142,7 +144,8 @@ export function createAdminRouter(deps: {
   }
 
   function updateRouting(req: Request, res: Response) {
-    const patch = req.body as Partial<RoutingSettings>;
+    const patch = parseRequestBody(res, updateRoutingBodySchema, req.body) as Partial<RoutingSettings> | null;
+    if (!patch) return;
     res.json(updateRoutingSettings(patch));
   }
 
@@ -167,23 +170,12 @@ export function createAdminRouter(deps: {
   }
 
   function updateModels(req: Request, res: Response) {
-    const { ids, group, provider, enabled } = req.body as {
-      ids?: string[];
-      group?: string;
-      provider?: string;
-      enabled?: boolean;
-    };
-
-    if (typeof enabled !== "boolean") {
-      res.status(400).json({ error: "enabled (boolean) required" });
-      return;
-    }
+    const body = parseRequestBody(res, updateModelsBodySchema, req.body);
+    if (!body) return;
+    const { ids, group, provider, enabled } = body;
 
     const targets = updateModelAvailability({ ids, group, provider, enabled });
-    if (!targets) {
-      res.status(400).json({ error: "ids (string[]), group (string), or provider (string) required" });
-      return;
-    }
+    if (!targets) return;
 
     res.json({ updated: targets.length, enabled, ids: targets });
   }

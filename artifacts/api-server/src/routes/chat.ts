@@ -1,7 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { Router, type IRouter, type Request, type Response } from "express";
+import { parseRequestBody } from "../lib/validation";
 import { requireApiKey } from "../middleware/auth";
+import { chatCompletionBodySchema } from "../schemas/chat";
 import { type Backend } from "../services/backendPool";
 import { type RequestLog } from "../services/requestLogs";
 import { type RegisteredProvider } from "../services/modelRegistry";
@@ -114,7 +116,9 @@ export function createChatRouter(deps: {
   const router = Router();
 
   async function handleChatCompletions(req: Request, res: Response) {
-    const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
+    const body = parseRequestBody(res, chatCompletionBodySchema, req.body);
+    if (!body) return;
+    const { model, messages, stream, max_tokens, tools, tool_choice } = body as {
       model?: string;
       messages: OAIMessage[];
       stream?: boolean;

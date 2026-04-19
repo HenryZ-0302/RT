@@ -1,6 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { type GoogleGenAI } from "@google/genai";
+import { parseRequestBody } from "../lib/validation";
 import { requireApiKey } from "../middleware/auth";
+import { geminiNativeImageBodySchema, openAiImageGenerationBodySchema } from "../schemas/images";
 import { type Backend } from "../services/backendPool";
 import { handleFriendJsonProxy } from "../services/friendProxy";
 import { type RegisteredModel } from "../services/modelRegistry";
@@ -361,7 +363,8 @@ export function createImagesRouter(deps: {
   }
 
   async function handleOpenAIImageGeneration(req: Request, res: Response) {
-    const body = req.body as OAIImageGenerationRequest;
+    const body = parseRequestBody(res, openAiImageGenerationBodySchema, req.body) as OAIImageGenerationRequest | null;
+    if (!body) return;
     if (body.response_format && body.response_format !== "b64_json") {
       throw new HttpStatusError(400, "This service only supports response_format 'b64_json' for image generation.");
     }
@@ -370,7 +373,8 @@ export function createImagesRouter(deps: {
   }
 
   async function handleGeminiNativeImage(req: Request, res: Response) {
-    const params = req.body as GeminiNativeImageRequest;
+    const params = parseRequestBody(res, geminiNativeImageBodySchema, req.body) as GeminiNativeImageRequest | null;
+    if (!params) return;
     const selectedModel = req.params.model;
     const modelInfo = deps.getRegisteredModel(selectedModel);
     if (!modelInfo || modelInfo.capability !== "image") {

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Router, type IRouter, type Request, type Response } from "express";
+import { parseRequestBody } from "../lib/validation";
 import { requireApiKey } from "../middleware/auth";
+import { anthropicMessagesBodySchema } from "../schemas/anthropic";
 import {
   CLAUDE_ADAPTIVE_THINKING_MODELS,
   CLAUDE_DEFAULT_THINKING_BUDGET,
@@ -447,7 +449,9 @@ export function createAnthropicRouter(deps: {
   const router = Router();
 
   async function handleAnthropicMessages(req: Request, res: Response) {
-    const rawBody = sanitizeAnthropicNativeValue(req.body) as {
+    const parsedBody = parseRequestBody(res, anthropicMessagesBodySchema, req.body);
+    if (!parsedBody) return;
+    const rawBody = sanitizeAnthropicNativeValue(parsedBody) as {
       model?: string;
       messages: unknown;
       system?: string | { type: string; text: string }[];
