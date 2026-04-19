@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { createAdminRouter } from "./admin";
+import { createAnthropicRouter, handleClaude } from "./anthropic";
 import catalogRouter from "./catalog";
 import { createGeminiRouter } from "./gemini";
 import { createImagesRouter } from "./images";
@@ -17,20 +18,13 @@ import {
   setHealth,
 } from "../services/backendPool";
 import {
-  CLAUDE_ADAPTIVE_THINKING_MODELS,
-  CLAUDE_DEFAULT_THINKING_BUDGET,
-  CLAUDE_MIN_THINKING_BUDGET,
   MODEL_REGISTRY,
   type ModelCapability,
-  getRegisteredModel,
-  hasRegisteredModel,
   isChatModel,
   isImageModel,
   isModelEnabled,
   modelRegistryReady,
-  normalizeClaudeThinkingDisplay,
   resolveClaudeThinkingModel,
-  shouldForceClaudeSummarizedThinking,
 } from "../services/modelRegistry";
 import { pushRequestLog } from "../services/requestLogs";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
@@ -39,68 +33,6 @@ import { getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
 router.use(catalogRouter);
-
-const ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES: Record<string, string> = {
-  web_search_20260209: "web_search_20250305",
-};
-
-function sanitizeAnthropicNativeValue(value: unknown): unknown {
-  if (value === "[undefined]") return undefined;
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitizeAnthropicNativeValue(item))
-      .filter((item) => item !== undefined);
-  }
-  if (value && typeof value === "object") {
-    const source = value as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
-    for (const [key, raw] of Object.entries(source)) {
-      const cleaned = sanitizeAnthropicNativeValue(raw);
-      if (cleaned !== undefined) result[key] = cleaned;
-    }
-    if (typeof result.type === "string" && ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES[result.type]) {
-      result.type = ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES[result.type];
-    }
-    return result;
-  }
-  return value;
-}
-
-function sanitizeAnthropicNativeMessages(messages: unknown): AnthropicMessage[] {
-  if (!Array.isArray(messages)) return [];
-
-  return messages
-    .map((message) => {
-      if (!message || typeof message !== "object") return null;
-      const entry = message as Record<string, unknown>;
-      const role = entry.role === "assistant" ? "assistant" : "user";
-      const content = entry.content;
-
-      if (typeof content === "string") {
-        return { role, content };
-      }
-
-      if (!Array.isArray(content)) {
-        return { role, content: "" };
-      }
-
-      const filteredContent = content.filter((part) => {
-        if (!part || typeof part !== "object") return false;
-        const item = part as Record<string, unknown>;
-        const type = typeof item.type === "string" ? item.type : "";
-        if ((type === "thinking" || type === "redacted_thinking") && typeof item.signature !== "string") {
-          return false;
-        }
-        return true;
-      }) as AnthropicContentPart[];
-
-      return {
-        role,
-        content: filteredContent,
-      };
-    })
-    .filter((message): message is AnthropicMessage => message !== null);
-}
 
 const {
   statsReady,
@@ -317,101 +249,6 @@ type OAIMessage =
   | { role: "tool"; content: string; tool_call_id: string }
   | { role: string; content: string | OAIContentPart[] | null };
 
-type AnthropicImageSource =
-  | { type: "base64"; media_type: string; data: string }
-  | { type: "url"; url: string };
-
-type AnthropicContentPart =
-  | { type: "text"; text: string }
-  | { type: "image"; source: AnthropicImageSource }
-  | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string };
-
-type AnthropicMessage = { role: "user" | "assistant"; content: string | AnthropicContentPart[] };
-
-function convertContentForClaude(content: string | OAIContentPart[] | null | undefined): string | AnthropicContentPart[] {
-  if (!content) return "";
-  if (typeof content === "string") return content;
-
-  return content.map((part): AnthropicContentPart => {
-    if (part.type === "image_url") {
-      const url = (part as { type: "image_url"; image_url: { url: string } }).image_url.url;
-      if (url.startsWith("data:")) {
-        const [header, data] = url.split(",");
-        const media_type = header.replace("data:", "").replace(";base64", "");
-        return { type: "image", source: { type: "base64", media_type, data } };
-      } else {
-        return { type: "image", source: { type: "url", url } };
-      }
-    }
-    if (part.type === "text") {
-      return { type: "text", text: (part as { type: "text"; text: string }).text };
-    }
-    return { type: "text", text: JSON.stringify(part) };
-  });
-}
-
-// Convert OpenAI tools array → Anthropic tools array
-function convertToolsForClaude(tools: OAITool[]): { name: string; description: string; input_schema: unknown }[] {
-  return tools.map((t) => ({
-    name: t.function.name,
-    description: t.function.description ?? "",
-    input_schema: t.function.parameters ?? { type: "object", properties: {} },
-  }));
-}
-
-// Convert OpenAI messages (incl. tool_calls / tool roles) → Anthropic messages
-function convertMessagesForClaude(messages: OAIMessage[]): AnthropicMessage[] {
-  const result: AnthropicMessage[] = [];
-
-  for (const msg of messages) {
-    if (msg.role === "system") continue; // handled as top-level system param
-
-    if (msg.role === "assistant") {
-      const assistantMsg = msg as Extract<OAIMessage, { role: "assistant" }>;
-      if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-        // Convert tool_calls to Anthropic tool_use blocks
-        const parts: AnthropicContentPart[] = [];
-        const textContent = assistantMsg.content;
-        if (textContent && (typeof textContent === "string" ? textContent.trim() : textContent.length > 0)) {
-          const converted = convertContentForClaude(textContent as string | OAIContentPart[]);
-          if (typeof converted === "string") {
-            if (converted.trim()) parts.push({ type: "text", text: converted });
-          } else {
-            parts.push(...converted);
-          }
-        }
-        for (const tc of assistantMsg.tool_calls) {
-          let input: unknown = {};
-          try { input = JSON.parse(tc.function.arguments); } catch {}
-          parts.push({ type: "tool_use", id: tc.id, name: tc.function.name, input });
-        }
-        result.push({ role: "assistant", content: parts });
-      } else {
-        result.push({
-          role: "assistant",
-          content: convertContentForClaude(assistantMsg.content as string | OAIContentPart[]),
-        });
-      }
-    } else if (msg.role === "tool") {
-      // Tool results → Anthropic user message with tool_result
-      const toolMsg = msg as Extract<OAIMessage, { role: "tool" }>;
-      result.push({
-        role: "user",
-        content: [{ type: "tool_result", tool_use_id: toolMsg.tool_call_id, content: toolMsg.content }],
-      });
-    } else {
-      // user (and any other role)
-      result.push({
-        role: "user",
-        content: convertContentForClaude(msg.content as string | OAIContentPart[]),
-      });
-    }
-  }
-
-  return result;
-}
-
 async function handleChatCompletions(req: Request, res: Response) {
   const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
     model?: string;
@@ -554,166 +391,6 @@ for (const path of ["/v1/chat/completions", "/service/chat"]) {
 // Accepts Anthropic API format directly (for clients like Cherry Studio, Claude.ai compatible tools)
 // ---------------------------------------------------------------------------
 
-async function handleAnthropicMessages(req: Request, res: Response) {
-  const rawBody = sanitizeAnthropicNativeValue(req.body) as {
-    model?: string;
-    messages: unknown;
-    system?: string | { type: string; text: string }[];
-    stream?: boolean;
-    max_tokens?: number;
-    temperature?: number;
-    thinking?:
-      | { type: "adaptive"; display?: "summarized" | "omitted" }
-      | { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" };
-    [key: string]: unknown;
-  };
-  const body = {
-    ...rawBody,
-    messages: sanitizeAnthropicNativeMessages(rawBody.messages),
-  };
-
-  const { model, messages, system, stream, max_tokens, thinking, ...rest } = body;
-  const selectedModel = model ?? "claude-sonnet-4-5";
-  const { actualModel, thinkingEnabled, resolvedMaxTokens } = resolveClaudeThinkingModel(selectedModel, max_tokens);
-  const effectiveThinking = (
-    thinking
-    ?? (thinkingEnabled
-      ? (
-        CLAUDE_ADAPTIVE_THINKING_MODELS.has(actualModel)
-          ? {
-            type: "adaptive" as const,
-            ...(shouldForceClaudeSummarizedThinking(actualModel) ? { display: "summarized" as const } : {}),
-          }
-          : { type: "enabled" as const, budget_tokens: Math.max(
-            CLAUDE_MIN_THINKING_BUDGET,
-            Math.min(CLAUDE_DEFAULT_THINKING_BUDGET, resolvedMaxTokens - 1),
-          ), ...(shouldForceClaudeSummarizedThinking(actualModel) ? { display: "summarized" as const } : {}) }
-      )
-      : undefined)
-  );
-  const normalizedThinking = effectiveThinking
-    ? normalizeClaudeThinkingDisplay(actualModel, effectiveThinking)
-    : undefined;
-  const shouldStream = stream ?? false;
-  const startTime = Date.now();
-
-  req.log.info({ model: selectedModel, actualModel, stream: shouldStream, thinking: normalizedThinking }, "Anthropic /v1/messages request");
-
-  try {
-    // If the model alias implies thinking AND the client also sent an explicit
-    // thinking parameter, just log a note and let the client's value win
-    // (effectiveThinking already prefers the client-supplied value).
-    if (thinkingEnabled && thinking) {
-      req.log.info({ model: selectedModel, actualModel }, "Model alias implies thinking; client also sent explicit thinking param — using client value");
-    }
-    if (
-      normalizedThinking
-      && normalizedThinking.type === "enabled"
-      && resolvedMaxTokens <= CLAUDE_MIN_THINKING_BUDGET
-    ) {
-      throw new HttpStatusError(
-        400,
-        `Thinking mode for '${actualModel}' requires max_tokens greater than ${CLAUDE_MIN_THINKING_BUDGET}. Received ${resolvedMaxTokens}.`,
-      );
-    }
-    if (
-      normalizedThinking
-      && normalizedThinking.type === "enabled"
-      && normalizedThinking.budget_tokens >= resolvedMaxTokens
-    ) {
-      throw new HttpStatusError(
-        400,
-        `Thinking mode for '${actualModel}' requires max_tokens greater than thinking.budget_tokens. Received max_tokens=${resolvedMaxTokens}.`,
-      );
-    }
-
-    const client = makeLocalAnthropic();
-
-    const createParams = {
-      model: actualModel,
-      max_tokens: resolvedMaxTokens,
-      messages,
-      ...(system ? { system } : {}),
-      ...(normalizedThinking ? { thinking: normalizedThinking } : {}),
-      ...rest,
-    } as Parameters<typeof client.messages.create>[0];
-
-    if (shouldStream) {
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-
-      const keepalive = setInterval(() => {
-        if (!res.writableEnded) writeAndFlush(res, ": keepalive\n\n");
-      }, 5000);
-      req.on("close", () => clearInterval(keepalive));
-
-      let inputTokens = 0;
-      let outputTokens = 0;
-
-      try {
-        const claudeStream = client.messages.stream(createParams as Parameters<typeof client.messages.stream>[0]);
-
-        for await (const event of claudeStream) {
-          if (event.type === "message_start") {
-            inputTokens = event.message.usage.input_tokens;
-          } else if (event.type === "message_delta") {
-            outputTokens = event.usage.output_tokens;
-          }
-          writeAndFlush(res, `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-        }
-        writeAndFlush(res, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
-        res.end();
-        const dur = Date.now() - startTime;
-        recordCallStat("local", dur, inputTokens, outputTokens, undefined, selectedModel);
-        pushRequestLog({
-          method: req.method, path: req.path, model: selectedModel,
-          backend: "local", status: 200, duration: dur, stream: true,
-          promptTokens: inputTokens, completionTokens: outputTokens, level: "info",
-        });
-      } finally {
-        clearInterval(keepalive);
-      }
-    } else {
-      const result = await client.messages.create(createParams);
-      const usage = (result as { usage?: { input_tokens?: number; output_tokens?: number } }).usage ?? {};
-      const dur = Date.now() - startTime;
-      recordCallStat("local", dur, usage.input_tokens ?? 0, usage.output_tokens ?? 0, undefined, selectedModel);
-      pushRequestLog({
-        method: req.method, path: req.path, model: selectedModel,
-        backend: "local", status: 200, duration: dur, stream: false,
-        promptTokens: usage.input_tokens ?? 0, completionTokens: usage.output_tokens ?? 0, level: "info",
-      });
-      res.json(result);
-    }
-  } catch (err: unknown) {
-    recordErrorStat("local");
-    const errMsg = err instanceof Error ? err.message : "Unknown error";
-    const status = err instanceof HttpStatusError
-      ? err.status
-      : (err != null && typeof (err as Record<string, unknown>).status === "number")
-        ? (err as Record<string, unknown>).status as number
-        : 500;
-    req.log.error({ err }, "/v1/messages request failed");
-    pushRequestLog({
-      method: req.method, path: req.path, model: selectedModel,
-      backend: "local", status, duration: Date.now() - startTime,
-      stream: shouldStream, level: "error", error: errMsg,
-    });
-    if (!res.headersSent) {
-      res.status(status).json({ error: { type: status >= 500 ? "server_error" : "invalid_request_error", message: errMsg } });
-    } else {
-      writeAndFlush(res, `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: status >= 500 ? "server_error" : "invalid_request_error", message: errMsg } })}\n\n`);
-      res.end();
-    }
-  }
-}
-
-for (const path of ["/v1/messages", "/service/messages"]) {
-  router.post(path, requireApiKey, handleAnthropicMessages);
-}
-
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -772,6 +449,13 @@ router.use(createGeminiRouter({
   recordErrorStat,
   pushRequestLog,
   sendApiError,
+}));
+
+router.use(createAnthropicRouter({
+  makeLocalAnthropic,
+  recordCallStat,
+  recordErrorStat,
+  pushRequestLog,
 }));
 
 // handleFriendProxy — raw fetch (bypasses SDK SSE parsing) so chunk.usage is
@@ -1158,247 +842,6 @@ async function handleGemini({
       },
     });
     return { promptTokens, completionTokens };
-  }
-}
-
-async function handleClaude({
-  req, res, client, model, messages, stream, maxTokens, thinking = false, tools, toolChoice, startTime,
-}: {
-  req: Request;
-  res: Response;
-  client: Anthropic;
-  model: string;
-  messages: OAIMessage[];
-  stream: boolean;
-  maxTokens: number;
-  thinking?: boolean;
-  tools?: OAITool[];
-  toolChoice?: unknown;
-  startTime: number;
-}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
-  // Extract system prompt
-  const systemMessages = messages
-    .filter((m) => m.role === "system")
-    .map((m) => (typeof m.content === "string" ? m.content : (m.content as OAIContentPart[]).map((p) => (p.type === "text" ? (p as { type: "text"; text: string }).text : "")).join("")))
-    .join("\n");
-
-  // Convert all messages including tool_calls / tool roles
-  const chatMessages = convertMessagesForClaude(messages);
-
-  let thinkingParam:
-    | {}
-    | { thinking: { type: "adaptive"; display?: "summarized" | "omitted" } }
-    | { thinking: { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" } } = {};
-
-  if (thinking) {
-    if (CLAUDE_ADAPTIVE_THINKING_MODELS.has(model)) {
-      thinkingParam = {
-        thinking: normalizeClaudeThinkingDisplay(model, { type: "adaptive" }),
-      };
-    } else {
-      if (maxTokens <= CLAUDE_MIN_THINKING_BUDGET) {
-        throw new HttpStatusError(
-          400,
-          `Thinking mode for '${model}' requires max_tokens greater than ${CLAUDE_MIN_THINKING_BUDGET}. Received ${maxTokens}.`,
-        );
-      }
-
-      const budgetTokens = Math.max(
-        CLAUDE_MIN_THINKING_BUDGET,
-        Math.min(CLAUDE_DEFAULT_THINKING_BUDGET, maxTokens - 1),
-      );
-
-      if (budgetTokens >= maxTokens) {
-        throw new HttpStatusError(
-          400,
-          `Thinking mode for '${model}' requires max_tokens greater than thinking.budget_tokens. Received max_tokens=${maxTokens}.`,
-        );
-      }
-
-      thinkingParam = {
-        thinking: normalizeClaudeThinkingDisplay(model, {
-          type: "enabled",
-          budget_tokens: budgetTokens,
-        }),
-      };
-    }
-  }
-
-  // Convert tools to Anthropic format
-  const anthropicTools = tools?.length ? convertToolsForClaude(tools) : undefined;
-  // Convert tool_choice
-  let anthropicToolChoice: unknown;
-  if (toolChoice !== undefined && anthropicTools?.length) {
-    if (toolChoice === "auto") anthropicToolChoice = { type: "auto" };
-    else if (toolChoice === "none") anthropicToolChoice = { type: "none" };
-    else if (toolChoice === "required") anthropicToolChoice = { type: "any" };
-    else if (typeof toolChoice === "object" && (toolChoice as Record<string, unknown>).type === "function") {
-      anthropicToolChoice = { type: "tool", name: ((toolChoice as Record<string, unknown>).function as Record<string, unknown>).name };
-    }
-  }
-
-  if (
-    thinking
-    && anthropicToolChoice
-    && typeof anthropicToolChoice === "object"
-    && (anthropicToolChoice as { type?: string }).type
-    && ["any", "tool"].includes((anthropicToolChoice as { type?: string }).type!)
-  ) {
-    throw new HttpStatusError(
-      400,
-      "Claude thinking mode only supports tool_choice values of 'auto' or 'none'.",
-    );
-  }
-
-  const buildCreateParams = () => ({
-    model,
-    max_tokens: maxTokens,
-    ...(systemMessages ? { system: systemMessages } : {}),
-    ...thinkingParam,
-    messages: chatMessages,
-    ...(anthropicTools?.length ? { tools: anthropicTools } : {}),
-    ...(anthropicToolChoice ? { tool_choice: anthropicToolChoice } : {}),
-  });
-
-  const msgId = `msg_${Date.now()}`;
-
-  if (stream) {
-    setSseHeaders(res);
-    const keepalive = setInterval(() => {
-      if (!res.writableEnded) writeAndFlush(res, ": keepalive\n\n");
-    }, 5000);
-    req.on("close", () => clearInterval(keepalive));
-
-    try {
-      const claudeStream = client.messages.stream(buildCreateParams() as Parameters<typeof client.messages.stream>[0]);
-
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let ttftMs: number | undefined;
-      // Track current tool_use block index for streaming
-      let currentToolIndex = -1;
-      const toolIndexMap = new Map<number, number>(); // content_block index → tool_calls array index
-      let toolCallCount = 0;
-
-      for await (const event of claudeStream) {
-        if (event.type === "message_start") {
-          inputTokens = event.message.usage.input_tokens;
-          writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] })}\n\n`);
-
-        } else if (event.type === "content_block_start") {
-          const block = event.content_block;
-
-          if (block.type === "thinking") {
-            continue;
-          } else if (block.type === "tool_use") {
-            // Map this content block index to tool_calls array index
-            currentToolIndex = toolCallCount++;
-            toolIndexMap.set(event.index, currentToolIndex);
-            if (ttftMs === undefined) ttftMs = Date.now() - startTime;
-            // Send tool_call start chunk
-            writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { tool_calls: [{ index: currentToolIndex, id: block.id, type: "function", function: { name: block.name, arguments: "" } }] }, finish_reason: null }] })}\n\n`);
-          } else if (block.type === "text") {
-            continue;
-          }
-
-        } else if (event.type === "content_block_delta") {
-          const delta = event.delta;
-
-          if (delta.type === "thinking_delta") {
-            const cleaned = sanitizeThinkingText(delta.thinking);
-            if (cleaned) writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: buildReasoningFields(cleaned), finish_reason: null }] })}\n\n`);
-          } else if (delta.type === "text_delta") {
-            if (ttftMs === undefined) ttftMs = Date.now() - startTime;
-            writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { content: delta.text }, finish_reason: null }] })}\n\n`);
-          } else if (delta.type === "input_json_delta") {
-            // Tool argument streaming
-            const toolIdx = toolIndexMap.get(event.index) ?? currentToolIndex;
-            writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { tool_calls: [{ index: toolIdx, function: { arguments: delta.partial_json } }] }, finish_reason: null }] })}\n\n`);
-          }
-
-        } else if (event.type === "message_delta") {
-          outputTokens = event.usage.output_tokens;
-          const stopReason = event.delta.stop_reason;
-          const finishReason = stopReason === "tool_use" ? "tool_calls" : (stopReason ?? "stop");
-          writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens } })}\n\n`);
-        }
-      }
-
-      writeAndFlush(res, "data: [DONE]\n\n");
-      res.end();
-      return { promptTokens: inputTokens, completionTokens: outputTokens, ttftMs };
-    } finally {
-      clearInterval(keepalive);
-    }
-
-  } else {
-    // Non-streaming — some models (e.g. claude-opus-4) require streaming;
-    // detect the error and transparently upgrade to stream + collect.
-    let result: Anthropic.Message;
-    try {
-      result = await client.messages.create(buildCreateParams() as Parameters<typeof client.messages.create>[0]);
-    } catch (nonStreamErr: unknown) {
-      const errMsg = nonStreamErr instanceof Error ? nonStreamErr.message : String(nonStreamErr);
-      if (/streaming.*required|requires.*stream/i.test(errMsg)) {
-        req.log.warn("Claude model requires streaming — upgrading to stream+collect for non-stream request");
-        const claudeStream = client.messages.stream(buildCreateParams() as Parameters<typeof client.messages.stream>[0]);
-        const collected = await claudeStream.finalMessage();
-        result = collected;
-      } else {
-        throw nonStreamErr;
-      }
-    }
-
-    const textParts: string[] = [];
-    const reasoningParts: string[] = [];
-    const toolCalls: OAIToolCall[] = [];
-
-    for (const block of result.content) {
-      if (block.type === "thinking") {
-        const rawThinking = sanitizeThinkingText((block as { type: "thinking"; thinking: string }).thinking);
-        if (rawThinking) reasoningParts.push(rawThinking);
-      } else if (block.type === "text") {
-        textParts.push((block as { type: "text"; text: string }).text);
-      } else if (block.type === "tool_use") {
-        const toolBlock = block as { type: "tool_use"; id: string; name: string; input: unknown };
-        toolCalls.push({
-          id: toolBlock.id,
-          type: "function",
-          function: {
-            name: toolBlock.name,
-            arguments: JSON.stringify(toolBlock.input),
-          },
-        });
-      }
-    }
-
-    const text = textParts.join("\n\n");
-    const reasoningText = reasoningParts.join("\n\n");
-    const stopReason = result.stop_reason;
-    const finishReason = stopReason === "tool_use" ? "tool_calls" : (stopReason ?? "stop");
-
-    res.json({
-      id: result.id,
-      object: "chat.completion",
-      created: Math.floor(Date.now() / 1000),
-      model,
-      choices: [{
-        index: 0,
-        message: {
-          role: "assistant",
-          content: text || null,
-          ...(reasoningText ? buildReasoningFields(reasoningText) : {}),
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-        },
-        finish_reason: finishReason,
-      }],
-      usage: {
-        prompt_tokens: result.usage.input_tokens,
-        completion_tokens: result.usage.output_tokens,
-        total_tokens: result.usage.input_tokens + result.usage.output_tokens,
-      },
-    });
-    return { promptTokens: result.usage.input_tokens, completionTokens: result.usage.output_tokens };
   }
 }
 
