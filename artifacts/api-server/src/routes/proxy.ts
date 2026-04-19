@@ -2,143 +2,40 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
-import { readJson, writeJson } from "../lib/cloudPersist";
-import { requireApiKey, requireApiKeyWithQuery } from "../middleware/auth";
+import { createAdminRouter } from "./admin";
+import catalogRouter from "./catalog";
+import { requireApiKey } from "../middleware/auth";
 import {
   type Backend,
-  type RoutingSettings,
-  batchUpdateDynamicBackends,
-  buildBackendPool,
-  createDynamicBackend,
-  deleteDynamicBackend,
-  getAllFriendProxyConfigs,
-  getCachedHealth,
-  getFriendProxyConfigs,
   getRoutingSettings,
   initReady as backendPoolReady,
-  isDynamicBackendLabel,
   pickBackend,
   pickBackendExcluding,
   setHealth,
-  updateDynamicBackend,
-  updateRoutingSettings,
 } from "../services/backendPool";
-import { pushRequestLog, sendLogs, streamLogs } from "../services/requestLogs";
+import {
+  CLAUDE_ADAPTIVE_THINKING_MODELS,
+  CLAUDE_DEFAULT_THINKING_BUDGET,
+  CLAUDE_MIN_THINKING_BUDGET,
+  GEMINI_BASE_MODELS,
+  MODEL_REGISTRY,
+  type ModelCapability,
+  getRegisteredModel,
+  hasRegisteredModel,
+  isChatModel,
+  isImageModel,
+  isModelEnabled,
+  modelRegistryReady,
+  normalizeClaudeThinkingDisplay,
+  resolveClaudeThinkingModel,
+  shouldForceClaudeSummarizedThinking,
+} from "../services/modelRegistry";
+import { pushRequestLog } from "../services/requestLogs";
 import { createStatsTracker } from "../services/stats";
 import { getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
-
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
-
-const OPENAI_CHAT_MODELS = [
-  "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano",
-  "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
-  "gpt-4o", "gpt-4o-mini",
-  "o4-mini", "o3", "o3-mini",
-];
-const OPENAI_THINKING_ALIASES = OPENAI_CHAT_MODELS
-  .filter((m) => m.startsWith("o"))
-  .map((m) => `${m}-thinking`);
-
-const OPENAI_IMAGE_MODELS = [
-  "gpt-image-1",
-];
-
-const ANTHROPIC_BASE_MODELS = [
-  "claude-opus-4-7",
-  "claude-opus-4-6", "claude-opus-4-5", "claude-opus-4-1",
-  "claude-sonnet-4-6", "claude-sonnet-4-5",
-  "claude-haiku-4-5",
-];
-
-const CLAUDE_ADAPTIVE_THINKING_MODELS = new Set<string>([
-  "claude-opus-4-7",
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-]);
-const CLAUDE_DEFAULT_THINKING_BUDGET = 16000;
-const CLAUDE_MIN_THINKING_BUDGET = 1024;
-const CLAUDE_MODEL_MAX: Record<string, number> = {
-  "claude-opus-4-7": 64000,
-  "claude-haiku-4-5": 8096,
-  "claude-sonnet-4-5": 64000,
-  "claude-sonnet-4-6": 64000,
-  "claude-opus-4-1": 32000,
-  "claude-opus-4-5": 64000,
-  "claude-opus-4-6": 64000,
-};
-
-const GEMINI_BASE_MODELS = [
-  "gemini-3-pro-preview",
-  "gemini-3.1-pro-preview", "gemini-3-flash-preview",
-  "gemini-2.5-pro", "gemini-2.5-flash",
-];
-
-const GEMINI_IMAGE_MODELS = [
-  "gemini-3-pro-image-preview",
-  "gemini-2.5-flash-image",
-];
-
-const OPENROUTER_FEATURED = [
-  "x-ai/grok-4.20", "x-ai/grok-4.1-fast", "x-ai/grok-4-fast",
-  "x-ai/grok-4.20-multi-agent", "x-ai/grok-code-fast-1",
-  "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
-  "deepseek/deepseek-v3.2", "deepseek/deepseek-r1", "deepseek/deepseek-r1-0528",
-  "mistralai/mistral-small-2603", "qwen/qwen3.5-122b-a10b", "qwen/qwen3-coder-next",
-  "google/gemini-2.5-pro", "google/gemini-3.1-pro-preview",
-  "anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7",
-  "cohere/command-a", "amazon/nova-premier-v1", "baidu/ernie-4.5-300b-a47b",
-];
-
-type RegisteredProvider = "openai" | "anthropic" | "gemini" | "openrouter";
-type ModelCapability = "chat" | "image";
-type ModelGroup = "openai" | "openai_image" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
-type ModelTestMode = "chat" | "image";
-
-type RegisteredModel = {
-  id: string;
-  provider: RegisteredProvider;
-  capability: ModelCapability;
-  group: ModelGroup;
-  testMode: ModelTestMode;
-  description?: string;
-};
-
-function resolveClaudeThinkingModel(model: string, requestedMaxTokens?: number): {
-  actualModel: string;
-  thinkingEnabled: boolean;
-  resolvedMaxTokens: number;
-} {
-  const thinkingEnabled = model.endsWith("-thinking");
-  const actualModel = thinkingEnabled
-    ? model.replace(/-thinking$/, "")
-    : model;
-  const modelMax = CLAUDE_MODEL_MAX[actualModel] ?? 32000;
-  const defaultMaxTokens = thinkingEnabled ? Math.max(modelMax, 32000) : modelMax;
-  return {
-    actualModel,
-    thinkingEnabled,
-    resolvedMaxTokens: Math.min(requestedMaxTokens ?? defaultMaxTokens, modelMax),
-  };
-}
-
-function shouldForceClaudeSummarizedThinking(model: string): boolean {
-  return model === "claude-opus-4-7";
-}
-
-function normalizeClaudeThinkingDisplay<
-  T extends { type: "adaptive"; display?: "summarized" | "omitted" }
-    | { type: "enabled"; budget_tokens: number; display?: "summarized" | "omitted" }
->(model: string, thinking: T): T {
-  if (!shouldForceClaudeSummarizedThinking(model) || thinking.display) return thinking;
-  return {
-    ...thinking,
-    display: "summarized",
-  };
-}
+router.use(catalogRouter);
 
 const ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES: Record<string, string> = {
   web_search_20260209: "web_search_20250305",
@@ -202,125 +99,6 @@ function sanitizeAnthropicNativeMessages(messages: unknown): AnthropicMessage[] 
     .filter((message): message is AnthropicMessage => message !== null);
 }
 
-const REGISTERED_MODELS: RegisteredModel[] = [
-  ...OPENAI_CHAT_MODELS.map((id) => ({
-    id,
-    provider: "openai" as const,
-    capability: "chat" as const,
-    group: "openai" as const,
-    testMode: "chat" as const,
-    description: "OpenAI model",
-  })),
-  ...OPENAI_THINKING_ALIASES.map((id) => ({
-    id,
-    provider: "openai" as const,
-    capability: "chat" as const,
-    group: "openai" as const,
-    testMode: "chat" as const,
-    description: "OpenAI thinking alias",
-  })),
-  ...OPENAI_IMAGE_MODELS.map((id) => ({
-    id,
-    provider: "openai" as const,
-    capability: "image" as const,
-    group: "openai_image" as const,
-    testMode: "image" as const,
-    description: "OpenAI image generation model",
-  })),
-  ...ANTHROPIC_BASE_MODELS.flatMap((id) => ([
-    {
-      id,
-      provider: "anthropic" as const,
-      capability: "chat" as const,
-      group: "anthropic" as const,
-      testMode: "chat" as const,
-      description: "Anthropic Claude model",
-    },
-    {
-      id: `${id}-thinking`,
-      provider: "anthropic" as const,
-      capability: "chat" as const,
-      group: "anthropic" as const,
-      testMode: "chat" as const,
-      description: "Extended thinking (hidden)",
-    },
-  ])),
-  ...GEMINI_BASE_MODELS.flatMap((id) => ([
-    {
-      id,
-      provider: "gemini" as const,
-      capability: "chat" as const,
-      group: "gemini" as const,
-      testMode: "chat" as const,
-      description: "Gemini chat model",
-    },
-    {
-      id: `${id}-thinking`,
-      provider: "gemini" as const,
-      capability: "chat" as const,
-      group: "gemini" as const,
-      testMode: "chat" as const,
-      description: "Gemini thinking alias",
-    },
-  ])),
-  ...GEMINI_IMAGE_MODELS.map((id) => ({
-    id,
-    provider: "gemini" as const,
-    capability: "image" as const,
-    group: "gemini_image" as const,
-    testMode: "image" as const,
-    description: "Gemini image generation model",
-  })),
-  ...OPENROUTER_FEATURED.map((id) => ({
-    id,
-    provider: "openrouter" as const,
-    capability: "chat" as const,
-    group: "openrouter" as const,
-    testMode: "chat" as const,
-    description: "OpenRouter model",
-  })),
-];
-
-const MODEL_REGISTRY = new Map(REGISTERED_MODELS.map((model) => [model.id, model]));
-const ALL_MODELS = REGISTERED_MODELS.map((model) => ({ id: model.id, description: model.description }));
-const CHAT_MODEL_IDS = new Set(REGISTERED_MODELS.filter((m) => m.capability === "chat").map((m) => m.id));
-const IMAGE_MODEL_IDS = new Set(REGISTERED_MODELS.filter((m) => m.capability === "image").map((m) => m.id));
-
-// ---------------------------------------------------------------------------
-// Model provider map + enable/disable management
-// ---------------------------------------------------------------------------
-
-type ModelProvider = "openai" | "anthropic" | "gemini" | "openrouter";
-
-// Build a complete id → provider lookup from the model constants above
-const MODEL_PROVIDER_MAP = new Map<string, ModelProvider>(
-  REGISTERED_MODELS.map((model) => [model.id, model.provider]),
-);
-
-let disabledModels: Set<string> = new Set<string>();
-
-function isModelEnabled(id: string): boolean {
-  return !disabledModels.has(id);
-}
-
-function getRegisteredModel(id: string | undefined): RegisteredModel | undefined {
-  return id ? MODEL_REGISTRY.get(id) : undefined;
-}
-
-function isImageModel(id: string | undefined): boolean {
-  return !!id && IMAGE_MODEL_IDS.has(id);
-}
-
-function isChatModel(id: string | undefined): boolean {
-  return !!id && CHAT_MODEL_IDS.has(id);
-}
-
-function saveDisabledModels(set: Set<string>): void {
-  writeJson("disabled_models.json", [...set]).catch((err) => {
-    console.error("[persist] failed to save disabled_models:", err);
-  });
-}
-
 const {
   statsReady,
   getStat,
@@ -330,15 +108,10 @@ const {
   recordErrorStat,
   clearStats,
 } = createStatsTracker((model) => MODEL_REGISTRY.get(model)?.capability ?? "chat");
+router.use(createAdminRouter({ clearStats, getModelStatsObject, getStat }));
 
 export const initReady: Promise<void> = (async () => {
-  await backendPoolReady;
-
-  const savedDisabled = await readJson<string[]>("disabled_models.json").catch(() => null);
-  if (Array.isArray(savedDisabled)) {
-    disabledModels = new Set<string>(savedDisabled);
-    console.log(`[init] loaded ${disabledModels.size} disabled model(s)`);
-  }
+  await Promise.all([backendPoolReady, modelRegistryReady]);
 })();
 
 export { statsReady };
@@ -545,97 +318,6 @@ async function fakeStreamResponse(
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
-
-function sendModelCatalog(_req: Request, res: Response) {
-  const pool = buildBackendPool();
-  const friendStatuses = getFriendProxyConfigs().map(({ label, url }) => ({
-    label,
-    url,
-    status: getCachedHealth(url) === null ? "unknown" : getCachedHealth(url) ? "healthy" : "down",
-  }));
-  res.json({
-    object: "list",
-    data: ALL_MODELS.filter((m) => isModelEnabled(m.id)).map((m) => ({
-      id: m.id,
-      object: "model",
-      created: 1700000000,
-      owned_by: MODEL_REGISTRY.get(m.id)?.provider ?? "service-layer",
-      description: m.description,
-      capability: MODEL_REGISTRY.get(m.id)?.capability ?? "chat",
-      group: MODEL_REGISTRY.get(m.id)?.group ?? "openrouter",
-    })),
-    _meta: {
-      active_backends: pool.length,
-      local: "healthy",
-      friends: friendStatuses,
-    },
-  });
-}
-
-for (const path of ["/v1/models", "/service/catalog"]) {
-  router.get(path, requireApiKeyWithQuery, sendModelCatalog);
-}
-
-function formatGeminiDisplayName(modelId: string): string {
-  return modelId
-    .split("-")
-    .map((part) => {
-      if (part === "gemini") return "Gemini";
-      if (/^\d+(?:\.\d+)?$/.test(part)) return part;
-      if (part === "pro") return "Pro";
-      if (part === "flash") return "Flash";
-      if (part === "preview") return "Preview";
-      if (part === "image") return "Image";
-      return part.charAt(0).toUpperCase() + part.slice(1);
-    })
-    .join(" ");
-}
-
-function buildGeminiNativeModel(modelId: string) {
-  const registered = MODEL_REGISTRY.get(modelId);
-  const isImage = registered?.capability === "image";
-  const versionMatch = modelId.match(/gemini-(\d+(?:\.\d+)?)/);
-
-  return {
-    name: `models/${modelId}`,
-    baseModelId: modelId,
-    version: versionMatch?.[1] ?? "preview",
-    displayName: formatGeminiDisplayName(modelId),
-    description: registered?.description ?? "Gemini model",
-    supportedGenerationMethods: isImage
-      ? ["generateImages"]
-      : ["generateContent", "streamGenerateContent", "countTokens"],
-    thinking: !isImage && GEMINI_BASE_MODELS.includes(modelId),
-  };
-}
-
-function listGeminiNativeModels(_req: Request, res: Response) {
-  const models = [...GEMINI_BASE_MODELS, ...GEMINI_IMAGE_MODELS]
-    .filter((id) => isModelEnabled(id))
-    .map((id) => buildGeminiNativeModel(id));
-
-  res.json({ models });
-}
-
-function getGeminiNativeModel(req: Request, res: Response) {
-  const rawModel = req.params.model;
-  const modelId = rawModel.startsWith("models/") ? rawModel.slice("models/".length) : rawModel;
-
-  if (![...GEMINI_BASE_MODELS, ...GEMINI_IMAGE_MODELS].includes(modelId) || !isModelEnabled(modelId)) {
-    res.status(404).json({
-      error: {
-        message: `Model 'models/${modelId}' not found`,
-        type: "not_found",
-      },
-    });
-    return;
-  }
-
-  res.json(buildGeminiNativeModel(modelId));
-}
-
-router.get("/v1beta/models", requireApiKeyWithQuery, listGeminiNativeModels);
-router.get("/v1beta/models/:model", requireApiKeyWithQuery, getGeminiNativeModel);
 
 // ---------------------------------------------------------------------------
 // Image format conversion: OpenAI image_url → Anthropic image
@@ -1126,7 +808,7 @@ async function generateOpenAICompatibleImageResponse(
   req: Request,
   body: OAIImageGenerationRequest,
 ): Promise<Record<string, unknown>> {
-  if (body.model && !MODEL_REGISTRY.has(body.model)) {
+  if (body.model && !hasRegisteredModel(body.model)) {
     throw new HttpStatusError(400, `Unknown model '${body.model}'.`);
   }
   const selectedModel = body.model ?? "gemini-2.5-flash-image";
@@ -1996,195 +1678,6 @@ async function handleAnthropicMessages(req: Request, res: Response) {
 
 for (const path of ["/v1/messages", "/service/messages"]) {
   router.post(path, requireApiKey, handleAnthropicMessages);
-}
-
-function sendMetrics(_req: Request, res: Response) {
-  const allConfigs = getAllFriendProxyConfigs();
-  const allLabels = ["local", ...allConfigs.map((c) => c.label)];
-  const result: Record<string, unknown> = {};
-  for (const label of allLabels) {
-    const s = getStat(label);
-    const cfg = allConfigs.find((c) => c.label === label);
-    result[label] = {
-      calls: s.calls,
-      errors: s.errors,
-      streamingCalls: s.streamingCalls,
-      promptTokens: s.promptTokens,
-      completionTokens: s.completionTokens,
-      totalTokens: s.promptTokens + s.completionTokens,
-      avgDurationMs: s.calls > 0 ? Math.round(s.totalDurationMs / s.calls) : 0,
-      avgTtftMs: s.streamingCalls > 0 ? Math.round(s.totalTtftMs / s.streamingCalls) : null,
-      health: label === "local" ? "healthy" : getCachedHealth(cfg?.url ?? "") === false ? "down" : "healthy",
-      url: label === "local" ? null : cfg?.url ?? null,
-      dynamic: isDynamicBackendLabel(label),
-      enabled: cfg ? cfg.enabled : true,
-    };
-  }
-  const modelStats = getModelStatsObject();
-  res.json({ stats: result, modelStats, uptimeSeconds: Math.round(process.uptime()), routing: getRoutingSettings() });
-}
-
-function resetMetrics(_req: Request, res: Response) {
-  clearStats();
-  res.json({ ok: true });
-}
-
-for (const path of ["/v1/admin/logs", "/service/logs"]) {
-  router.get(path, requireApiKey, sendLogs);
-}
-
-for (const path of ["/v1/admin/logs/stream", "/service/logs/stream"]) {
-  router.get(path, requireApiKeyWithQuery, streamLogs);
-}
-
-for (const path of ["/v1/stats", "/service/metrics"]) {
-  router.get(path, requireApiKey, sendMetrics);
-}
-
-for (const path of ["/v1/admin/stats/reset", "/service/metrics/reset"]) {
-  router.post(path, requireApiKey, resetMetrics);
-}
-
-// ---------------------------------------------------------------------------
-// Admin: manage dynamic backends at runtime (no restart / redeploy required)
-// ---------------------------------------------------------------------------
-
-function listBackends(_req: Request, res: Response) {
-  const allConfigs = getAllFriendProxyConfigs();
-  res.json({
-    local: { url: null, source: "local" },
-    env: allConfigs
-      .filter((config) => !isDynamicBackendLabel(config.label))
-      .map((config) => ({ label: config.label, url: config.url, source: "env", health: getCachedHealth(config.url) === false ? "down" : "healthy" })),
-    dynamic: allConfigs
-      .filter((config) => isDynamicBackendLabel(config.label))
-      .map((config) => ({
-        label: config.label,
-        url: config.url,
-        enabled: config.enabled,
-        source: "dynamic",
-        health: getCachedHealth(config.url) === false ? "down" : "healthy",
-      })),
-  });
-}
-
-function createBackend(req: Request, res: Response) {
-  const { url } = req.body as { url?: string };
-  if (!url || typeof url !== "string" || !url.startsWith("http")) {
-    res.status(400).json({ error: "Valid https URL required" });
-    return;
-  }
-  try {
-    res.json(createDynamicBackend(url));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to create backend";
-    res.status(message === "URL already in pool" ? 409 : 500).json({ error: message });
-  }
-}
-
-function deleteBackend(req: Request, res: Response) {
-  const { label } = req.params;
-  if (!deleteDynamicBackend(label)) { res.status(404).json({ error: "Dynamic backend not found" }); return; }
-  res.json({ deleted: true, label });
-}
-
-// PATCH /v1/admin/backends/:label — 切换单个节点启用/禁用
-function updateBackend(req: Request, res: Response) {
-  const { label } = req.params;
-  const { enabled } = req.body as { enabled?: boolean };
-  if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) required" }); return; }
-  const target = updateDynamicBackend(label, enabled);
-  if (!target) { res.status(404).json({ error: "Dynamic backend not found" }); return; }
-  res.json({ label, enabled });
-}
-
-// PATCH /v1/admin/backends — 批量切换（labels 数组 + enabled 布尔值）
-function batchUpdateBackends(req: Request, res: Response) {
-  const { labels, enabled } = req.body as { labels?: string[]; enabled?: boolean };
-  if (!Array.isArray(labels) || typeof enabled !== "boolean") {
-    res.status(400).json({ error: "labels (string[]) and enabled (boolean) required" });
-    return;
-  }
-  const updated = batchUpdateDynamicBackends(labels, enabled);
-  res.json({ updated, enabled });
-}
-
-for (const path of ["/v1/admin/backends", "/service/backends"]) {
-  router.get(path, requireApiKey, listBackends);
-  router.post(path, requireApiKey, createBackend);
-  router.patch(path, requireApiKey, batchUpdateBackends);
-}
-
-for (const path of ["/v1/admin/backends/:label", "/service/backends/:label"]) {
-  router.delete(path, requireApiKey, deleteBackend);
-  router.patch(path, requireApiKey, updateBackend);
-}
-
-function getRouting(_req: Request, res: Response) {
-  res.json(getRoutingSettings());
-}
-
-function updateRouting(req: Request, res: Response) {
-  const patch = req.body as Partial<RoutingSettings>;
-  res.json(updateRoutingSettings(patch));
-}
-
-for (const path of ["/v1/admin/routing", "/service/routing"]) {
-  router.get(path, requireApiKey, getRouting);
-  router.patch(path, requireApiKey, updateRouting);
-}
-
-// ---------------------------------------------------------------------------
-// Admin: model enable/disable management
-// ---------------------------------------------------------------------------
-
-// GET /v1/admin/models — list all models with provider + enabled status
-function listModels(_req: Request, res: Response) {
-  const models = ALL_MODELS.map((m) => ({
-    id: m.id,
-    provider: MODEL_REGISTRY.get(m.id)?.provider ?? "openrouter",
-    capability: MODEL_REGISTRY.get(m.id)?.capability ?? "chat",
-    group: MODEL_REGISTRY.get(m.id)?.group ?? "openrouter",
-    testMode: MODEL_REGISTRY.get(m.id)?.testMode ?? "chat",
-    enabled: isModelEnabled(m.id),
-  }));
-  const summary: Record<string, { total: number; enabled: number }> = {};
-  for (const m of models) {
-    if (!summary[m.group]) summary[m.group] = { total: 0, enabled: 0 };
-    summary[m.group].total++;
-    if (m.enabled) summary[m.group].enabled++;
-  }
-  res.json({ models, summary });
-}
-
-// PATCH /v1/admin/models — bulk enable/disable by ids or by provider
-// Body: { ids?: string[], provider?: string, enabled: boolean }
-function updateModels(req: Request, res: Response) {
-  const { ids, group, provider, enabled } = req.body as { ids?: string[]; group?: string; provider?: string; enabled?: boolean };
-  if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) required" }); return; }
-
-  let targets: string[] = [];
-  if (Array.isArray(ids) && ids.length > 0) {
-    targets = ids.filter((id) => MODEL_REGISTRY.has(id));
-  } else if (typeof group === "string") {
-    targets = REGISTERED_MODELS.filter((model) => model.group === group).map((model) => model.id);
-  } else if (typeof provider === "string") {
-    targets = REGISTERED_MODELS.filter((model) => model.provider === provider).map((model) => model.id);
-  } else {
-    res.status(400).json({ error: "ids (string[]), group (string), or provider (string) required" }); return;
-  }
-
-  for (const id of targets) {
-    if (enabled) disabledModels.delete(id);
-    else disabledModels.add(id);
-  }
-  saveDisabledModels(disabledModels);
-  res.json({ updated: targets.length, enabled, ids: targets });
-}
-
-for (const path of ["/v1/admin/models", "/service/models"]) {
-  router.get(path, requireApiKeyWithQuery, listModels);
-  router.patch(path, requireApiKey, updateModels);
 }
 
 // ---------------------------------------------------------------------------
