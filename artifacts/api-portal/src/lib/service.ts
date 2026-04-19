@@ -56,8 +56,8 @@ export const servicePaths = {
   logs(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/logs`;
   },
-  logsStream(baseUrl: string, key: string): string {
-    return `${serviceBase(baseUrl)}/logs/stream?key=${encodeURIComponent(key)}`;
+  logsStream(baseUrl: string): string {
+    return `${serviceBase(baseUrl)}/logs/stream`;
   },
   backends(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/backends`;

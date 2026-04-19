@@ -3,7 +3,28 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { readJson, writeJson } from "../lib/cloudPersist";
-import { getServiceAccessKey } from "../lib/serviceConfig";
+import { requireApiKey, requireApiKeyWithQuery } from "../middleware/auth";
+import {
+  type Backend,
+  type RoutingSettings,
+  batchUpdateDynamicBackends,
+  buildBackendPool,
+  createDynamicBackend,
+  deleteDynamicBackend,
+  getAllFriendProxyConfigs,
+  getCachedHealth,
+  getFriendProxyConfigs,
+  getRoutingSettings,
+  initReady as backendPoolReady,
+  isDynamicBackendLabel,
+  pickBackend,
+  pickBackendExcluding,
+  setHealth,
+  updateDynamicBackend,
+  updateRoutingSettings,
+} from "../services/backendPool";
+import { pushRequestLog, sendLogs, streamLogs } from "../services/requestLogs";
+import { createStatsTracker } from "../services/stats";
 import { getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
@@ -266,34 +287,6 @@ const CHAT_MODEL_IDS = new Set(REGISTERED_MODELS.filter((m) => m.capability === 
 const IMAGE_MODEL_IDS = new Set(REGISTERED_MODELS.filter((m) => m.capability === "image").map((m) => m.id));
 
 // ---------------------------------------------------------------------------
-// Backend pool — round-robin across local account + multiple friend proxies
-// with background health checking
-// ---------------------------------------------------------------------------
-
-type Backend =
-  | { kind: "local" }
-  | { kind: "friend"; label: string; url: string; apiKey: string };
-
-interface HealthEntry { healthy: boolean; checkedAt: number }
-const healthCache = new Map<string, HealthEntry>();
-const HEALTH_TTL_MS = 30_000;   // reuse cached result for 30s
-const HEALTH_TIMEOUT_MS = 15_000; // 15s timeout per check (Replit cold starts can take 10–30s)
-
-// ---------------------------------------------------------------------------
-// Dynamic backends (cloud-persisted via GCS in production, local file in dev)
-// ---------------------------------------------------------------------------
-
-interface DynamicBackend { label: string; url: string; enabled?: boolean }
-
-let dynamicBackends: DynamicBackend[] = [];
-
-function saveDynamicBackends(list: DynamicBackend[]): void {
-  writeJson("dynamic_backends.json", list).catch((err) => {
-    console.error("[persist] failed to save dynamic_backends:", err);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Model provider map + enable/disable management
 // ---------------------------------------------------------------------------
 
@@ -305,43 +298,6 @@ const MODEL_PROVIDER_MAP = new Map<string, ModelProvider>(
 );
 
 let disabledModels: Set<string> = new Set<string>();
-
-function saveDisabledModels(set: Set<string>): void {
-  writeJson("disabled_models.json", [...set]).catch((err) => {
-    console.error("[persist] failed to save disabled_models:", err);
-  });
-}
-
-interface RoutingSettings { localEnabled: boolean; localFallback: boolean; fakeStream: boolean }
-let routingSettings: RoutingSettings = { localEnabled: true, localFallback: true, fakeStream: true };
-
-export const initReady: Promise<void> = (async () => {
-  const [savedBackends, savedDisabled, savedRouting] = await Promise.all([
-    readJson<DynamicBackend[]>("dynamic_backends.json").catch(() => null),
-    readJson<string[]>("disabled_models.json").catch(() => null),
-    readJson<Partial<RoutingSettings>>("routing_settings.json").catch(() => null),
-  ]);
-  if (Array.isArray(savedBackends)) {
-    dynamicBackends = savedBackends;
-    console.log(`[init] loaded ${dynamicBackends.length} dynamic backend(s)`);
-  }
-  if (Array.isArray(savedDisabled)) {
-    disabledModels = new Set<string>(savedDisabled);
-    console.log(`[init] loaded ${disabledModels.size} disabled model(s)`);
-  }
-  if (savedRouting && typeof savedRouting === "object") {
-    if (typeof savedRouting.localEnabled === "boolean") routingSettings.localEnabled = savedRouting.localEnabled;
-    if (typeof savedRouting.localFallback === "boolean") routingSettings.localFallback = savedRouting.localFallback;
-    if (typeof savedRouting.fakeStream === "boolean") routingSettings.fakeStream = savedRouting.fakeStream;
-  }
-  console.log("[init] routing settings:", JSON.stringify(routingSettings));
-})();
-
-function saveRoutingSettings(): void {
-  writeJson("routing_settings.json", routingSettings).catch((err) => {
-    console.error("[routing] failed to save settings:", err);
-  });
-}
 
 function isModelEnabled(id: string): boolean {
   return !disabledModels.has(id);
@@ -359,131 +315,33 @@ function isChatModel(id: string | undefined): boolean {
   return !!id && CHAT_MODEL_IDS.has(id);
 }
 
-// Normalize sub-node endpoint URL — ensures it ends with /api.
-// Sub-nodes use the same dual-mount architecture: /api/v1/* routes.
-function normalizeSubNodeUrl(raw: string): string {
-  const url = raw.trim().replace(/\/+$/, "");
-  if (!url) return url;
-  return /\/api$/i.test(url) ? url : url + "/api";
+function saveDisabledModels(set: Set<string>): void {
+  writeJson("disabled_models.json", [...set]).catch((err) => {
+    console.error("[persist] failed to save disabled_models:", err);
+  });
 }
 
-function getFriendProxyConfigs(): { label: string; url: string; apiKey: string }[] {
-  const apiKey = getServiceAccessKey() ?? "";
-  const configs: { label: string; url: string; apiKey: string }[] = [];
+const {
+  statsReady,
+  getStat,
+  getModelStatsObject,
+  recordCallStat,
+  recordImageCallStat,
+  recordErrorStat,
+  clearStats,
+} = createStatsTracker((model) => MODEL_REGISTRY.get(model)?.capability ?? "chat");
 
-  // Auto-scan FRIEND_PROXY_URL, FRIEND_PROXY_URL_2 … FRIEND_PROXY_URL_20 from env
-  const envKeys = ["FRIEND_PROXY_URL", ...Array.from({ length: 19 }, (_, i) => `FRIEND_PROXY_URL_${i + 2}`)];
-  for (const key of envKeys) {
-    const raw = process.env[key];
-    if (raw) configs.push({ label: key.replace("FRIEND_PROXY_URL", "FRIEND"), url: normalizeSubNodeUrl(raw), apiKey });
+export const initReady: Promise<void> = (async () => {
+  await backendPoolReady;
+
+  const savedDisabled = await readJson<string[]>("disabled_models.json").catch(() => null);
+  if (Array.isArray(savedDisabled)) {
+    disabledModels = new Set<string>(savedDisabled);
+    console.log(`[init] loaded ${disabledModels.size} disabled model(s)`);
   }
+})();
 
-  // Merge dynamic backends (added via API), skip duplicates and disabled ones
-  const knownUrls = new Set(configs.map((c) => c.url));
-  for (const d of dynamicBackends) {
-    const url = normalizeSubNodeUrl(d.url);
-    if (!knownUrls.has(url) && d.enabled !== false) configs.push({ label: d.label, url, apiKey });
-  }
-
-  return configs;
-}
-
-// getAllFriendProxyConfigs — 返回全部节点（含禁用的），专供统计页面使用
-function getAllFriendProxyConfigs(): { label: string; url: string; apiKey: string; enabled: boolean }[] {
-  const apiKey = getServiceAccessKey() ?? "";
-  const configs: { label: string; url: string; apiKey: string; enabled: boolean }[] = [];
-
-  const envKeys = ["FRIEND_PROXY_URL", ...Array.from({ length: 19 }, (_, i) => `FRIEND_PROXY_URL_${i + 2}`)];
-  for (const key of envKeys) {
-    const raw = process.env[key];
-    if (raw) configs.push({ label: key.replace("FRIEND_PROXY_URL", "FRIEND"), url: normalizeSubNodeUrl(raw), apiKey, enabled: true });
-  }
-
-  const knownUrls = new Set(configs.map((c) => c.url));
-  for (const d of dynamicBackends) {
-    const url = normalizeSubNodeUrl(d.url);
-    if (!knownUrls.has(url)) configs.push({ label: d.label, url, apiKey, enabled: d.enabled !== false });
-  }
-
-  return configs;
-}
-
-async function probeHealth(url: string, apiKey: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-    const resp = await fetch(`${url}/v1/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    return resp.ok;
-  } catch {
-    return false;
-  }
-}
-
-function getCachedHealth(url: string): boolean | null {
-  const entry = healthCache.get(url);
-  if (!entry) return null; // unknown — never checked
-  if (Date.now() - entry.checkedAt < HEALTH_TTL_MS) return entry.healthy;
-  return null; // stale
-}
-
-function setHealth(url: string, healthy: boolean): void {
-  healthCache.set(url, { healthy, checkedAt: Date.now() });
-}
-
-// Refresh stale/unknown health entries in the background (non-blocking)
-function refreshHealthAsync(): void {
-  const configs = getFriendProxyConfigs();
-  for (const { url, apiKey } of configs) {
-    if (getCachedHealth(url) === null) {
-      probeHealth(url, apiKey).then((ok) => setHealth(url, ok)).catch(() => setHealth(url, false));
-    }
-  }
-}
-
-// Kick off initial health checks after a short delay (server hasn't fully started yet)
-setTimeout(refreshHealthAsync, 2000);
-// Recheck every 30s
-setInterval(refreshHealthAsync, HEALTH_TTL_MS);
-
-function buildBackendPool(): Backend[] {
-  const friends: Backend[] = [];
-
-  for (const { label, url, apiKey } of getFriendProxyConfigs()) {
-    const healthy = getCachedHealth(url);
-    if (healthy !== false) {
-      friends.push({ kind: "friend", label, url, apiKey });
-    }
-  }
-
-  if (friends.length > 0) return friends;
-
-  if (routingSettings.localFallback && routingSettings.localEnabled) return [{ kind: "local" }];
-
-  return [];
-}
-
-let requestCounter = 0;
-
-function pickBackend(): Backend | null {
-  const pool = buildBackendPool();
-  if (pool.length === 0) return null;
-  const backend = pool[requestCounter % pool.length];
-  requestCounter++;
-  return backend;
-}
-
-function pickBackendExcluding(exclude: Set<string>): Backend | null {
-  const friends = buildBackendPool().filter(
-    (b) => b.kind === "friend" && !exclude.has(b.url)
-  );
-  if (friends.length > 0) return friends[requestCounter % friends.length];
-  if (routingSettings.localFallback && routingSettings.localEnabled) return { kind: "local" };
-  return null;
-}
+export { statsReady };
 
 // ---------------------------------------------------------------------------
 // Client factories
@@ -543,158 +401,6 @@ function makeLocalOpenRouter(): OpenAI {
   }
   return new OpenAI({ apiKey, baseURL });
 }
-
-
-// ---------------------------------------------------------------------------
-// Per-backend usage statistics — persisted to cloudPersist ("usage_stats.json")
-// ---------------------------------------------------------------------------
-
-const STATS_FILE = "usage_stats.json";
-
-interface BackendStat {
-  calls: number;
-  errors: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalDurationMs: number;
-  totalTtftMs: number;
-  streamingCalls: number;
-}
-
-interface ModelStat {
-  calls: number;
-  promptTokens: number;
-  completionTokens: number;
-  capability?: ModelCapability;
-}
-
-const EMPTY_STAT = (): BackendStat => ({
-  calls: 0, errors: 0, promptTokens: 0, completionTokens: 0,
-  totalDurationMs: 0, totalTtftMs: 0, streamingCalls: 0,
-});
-
-const EMPTY_MODEL_STAT = (): ModelStat => ({
-  calls: 0, promptTokens: 0, completionTokens: 0,
-});
-
-const statsMap = new Map<string, BackendStat>();
-const modelStatsMap = new Map<string, ModelStat>();
-
-// ── Persistence helpers ────────────────────────────────────────────────────
-
-function statsToObject(): { backends: Record<string, BackendStat>; models: Record<string, ModelStat> } {
-  return {
-    backends: Object.fromEntries(statsMap.entries()),
-    models: Object.fromEntries(modelStatsMap.entries()),
-  };
-}
-
-async function persistStats(): Promise<void> {
-  try { await writeJson(STATS_FILE, statsToObject()); } catch {}
-}
-
-let _saveTimer: ReturnType<typeof setTimeout> | null = null;
-function scheduleSave(): void {
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => { _saveTimer = null; void persistStats(); }, 2_000);
-}
-
-setInterval(() => { void persistStats(); }, 60_000);
-
-for (const sig of ["SIGTERM", "SIGINT"] as const) {
-  process.on(sig, () => {
-    console.log(`[stats] ${sig} received, flushing stats…`);
-    persistStats().finally(() => process.exit(0));
-    setTimeout(() => process.exit(1), 3000);
-  });
-}
-
-export const statsReady: Promise<void> = (async () => {
-  try {
-    const saved = await readJson<Record<string, unknown>>(STATS_FILE);
-    if (saved && typeof saved === "object") {
-      const backendsRaw = (saved as { backends?: Record<string, BackendStat> }).backends ?? saved as Record<string, BackendStat>;
-      const modelsRaw = (saved as { models?: Record<string, ModelStat> }).models;
-
-      for (const [label, raw] of Object.entries(backendsRaw)) {
-        if (raw && typeof raw === "object" && "calls" in (raw as Record<string, unknown>)) {
-          statsMap.set(label, {
-            calls:            Number((raw as BackendStat).calls)            || 0,
-            errors:           Number((raw as BackendStat).errors)           || 0,
-            promptTokens:     Number((raw as BackendStat).promptTokens)     || 0,
-            completionTokens: Number((raw as BackendStat).completionTokens) || 0,
-            totalDurationMs:  Number((raw as BackendStat).totalDurationMs)  || 0,
-            totalTtftMs:      Number((raw as BackendStat).totalTtftMs)      || 0,
-            streamingCalls:   Number((raw as BackendStat).streamingCalls)   || 0,
-          });
-        }
-      }
-
-      if (modelsRaw && typeof modelsRaw === "object") {
-        for (const [model, raw] of Object.entries(modelsRaw)) {
-          if (raw && typeof raw === "object") {
-            modelStatsMap.set(model, {
-              calls:            Number(raw.calls)            || 0,
-              promptTokens:     Number(raw.promptTokens)     || 0,
-              completionTokens: Number(raw.completionTokens) || 0,
-              capability: raw.capability === "image" ? "image" : "chat",
-            });
-          }
-        }
-      }
-
-      console.log(`[stats] loaded ${statsMap.size} backend(s), ${modelStatsMap.size} model(s) from ${STATS_FILE}`);
-    }
-  } catch {
-    console.warn(`[stats] could not load ${STATS_FILE}, starting fresh`);
-  }
-})();
-
-// ── Stat accessors ─────────────────────────────────────────────────────────
-
-function getStat(label: string): BackendStat {
-  if (!statsMap.has(label)) statsMap.set(label, EMPTY_STAT());
-  return statsMap.get(label)!;
-}
-
-function recordCallStat(label: string, durationMs: number, prompt: number, completion: number, ttftMs?: number, model?: string): void {
-  const s = getStat(label);
-  s.calls++;
-  s.promptTokens += prompt;
-  s.completionTokens += completion;
-  s.totalDurationMs += durationMs;
-  if (ttftMs !== undefined) { s.totalTtftMs += ttftMs; s.streamingCalls++; }
-  if (model) {
-    const ms = getModelStat(model);
-    ms.calls++;
-    ms.promptTokens += prompt;
-    ms.completionTokens += completion;
-    ms.capability = MODEL_REGISTRY.get(model)?.capability ?? "chat";
-  }
-  scheduleSave();
-}
-
-function getModelStat(model: string): ModelStat {
-  if (!modelStatsMap.has(model)) {
-    modelStatsMap.set(model, {
-      ...EMPTY_MODEL_STAT(),
-      capability: MODEL_REGISTRY.get(model)?.capability ?? "chat",
-    });
-  }
-  return modelStatsMap.get(model)!;
-}
-
-function recordImageCallStat(label: string, durationMs: number, model: string): void {
-  const s = getStat(label);
-  s.calls++;
-  s.totalDurationMs += durationMs;
-  const ms = getModelStat(model);
-  ms.calls++;
-  ms.capability = "image";
-  scheduleSave();
-}
-
-function recordErrorStat(label: string): void { getStat(label).errors++; scheduleSave(); }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -834,72 +540,6 @@ async function fakeStreamResponse(
     completionTokens: usage?.completion_tokens ?? 0,
     ttftMs,
   };
-}
-
-function requireApiKey(req: Request, res: Response, next: () => void) {
-  const serviceKey = getServiceAccessKey();
-  if (!serviceKey) {
-    pushRequestLog({
-      method: req.method,
-      path: req.path,
-      status: 500,
-      duration: 0,
-      stream: false,
-      level: "error",
-      error: "Service access key is not configured",
-    });
-    res.status(500).json({ error: { message: "Service access key is not configured", type: "server_error" } });
-    return;
-  }
-
-  const authHeader = req.headers["authorization"];
-  const xApiKey = req.headers["x-api-key"];
-  const xGoogApiKey = req.headers["x-goog-api-key"];
-
-  let providedKey: string | undefined;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    providedKey = authHeader.slice(7);
-  } else if (typeof xApiKey === "string") {
-    providedKey = xApiKey;
-  } else if (typeof xGoogApiKey === "string") {
-    providedKey = xGoogApiKey;
-  }
-
-  if (!providedKey) {
-    pushRequestLog({
-      method: req.method,
-      path: req.path,
-      status: 401,
-      duration: 0,
-      stream: false,
-      level: "warn",
-      error: "Missing access key",
-    });
-    res.status(401).json({ error: { message: "Missing access key (provide Authorization: Bearer <key>, x-api-key, x-goog-api-key, or ?key=...)", type: "invalid_request_error" } });
-    return;
-  }
-  if (providedKey !== serviceKey) {
-    pushRequestLog({
-      method: req.method,
-      path: req.path,
-      status: 401,
-      duration: 0,
-      stream: false,
-      level: "warn",
-      error: "Invalid access key",
-    });
-    res.status(401).json({ error: { message: "Invalid access key", type: "invalid_request_error" } });
-    return;
-  }
-  next();
-}
-
-function requireApiKeyWithQuery(req: Request, res: Response, next: () => void) {
-  const queryKey = req.query["key"] as string | undefined;
-  if (queryKey) {
-    req.headers["authorization"] = `Bearer ${queryKey}`;
-  }
-  requireApiKey(req, res, next);
 }
 
 // ---------------------------------------------------------------------------
@@ -2358,61 +1998,6 @@ for (const path of ["/v1/messages", "/service/messages"]) {
   router.post(path, requireApiKey, handleAnthropicMessages);
 }
 
-// ---------------------------------------------------------------------------
-// Real-time request log ring buffer + SSE
-// ---------------------------------------------------------------------------
-
-interface RequestLog {
-  id: number;
-  time: string;
-  method: string;
-  path: string;
-  model?: string;
-  capability?: ModelCapability;
-  backend?: string;
-  status: number;
-  duration: number;
-  stream: boolean;
-  promptTokens?: number;
-  completionTokens?: number;
-  level: "info" | "warn" | "error";
-  error?: string;
-}
-
-const REQUEST_LOG_MAX = 200;
-const requestLogs: RequestLog[] = [];
-let logIdCounter = 0;
-const logSSEClients: Set<Response> = new Set();
-
-export function pushRequestLog(entry: Omit<RequestLog, "id" | "time">): void {
-  const log: RequestLog = { id: ++logIdCounter, time: new Date().toISOString(), ...entry };
-  requestLogs.push(log);
-  if (requestLogs.length > REQUEST_LOG_MAX) requestLogs.shift();
-  const data = `data: ${JSON.stringify(log)}\n\n`;
-  for (const client of logSSEClients) {
-    try { client.write(data); } catch { logSSEClients.delete(client); }
-  }
-}
-
-function sendLogs(_req: Request, res: Response) {
-  res.json({ logs: requestLogs });
-}
-
-function streamLogs(req: Request, res: Response) {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-  });
-  res.write(": connected\n\n");
-  logSSEClients.add(res);
-  const heartbeat = setInterval(() => {
-    if (!res.writableEnded) res.write(": heartbeat\n\n");
-  }, 20000);
-  req.on("close", () => { clearInterval(heartbeat); logSSEClients.delete(res); });
-}
-
 function sendMetrics(_req: Request, res: Response) {
   const allConfigs = getAllFriendProxyConfigs();
   const allLabels = ["local", ...allConfigs.map((c) => c.label)];
@@ -2431,18 +2016,16 @@ function sendMetrics(_req: Request, res: Response) {
       avgTtftMs: s.streamingCalls > 0 ? Math.round(s.totalTtftMs / s.streamingCalls) : null,
       health: label === "local" ? "healthy" : getCachedHealth(cfg?.url ?? "") === false ? "down" : "healthy",
       url: label === "local" ? null : cfg?.url ?? null,
-      dynamic: dynamicBackends.some((d) => d.label === label),
+      dynamic: isDynamicBackendLabel(label),
       enabled: cfg ? cfg.enabled : true,
     };
   }
-  const modelStats: Record<string, ModelStat> = Object.fromEntries(modelStatsMap.entries());
-  res.json({ stats: result, modelStats, uptimeSeconds: Math.round(process.uptime()), routing: routingSettings });
+  const modelStats = getModelStatsObject();
+  res.json({ stats: result, modelStats, uptimeSeconds: Math.round(process.uptime()), routing: getRoutingSettings() });
 }
 
 function resetMetrics(_req: Request, res: Response) {
-  statsMap.clear();
-  modelStatsMap.clear();
-  scheduleSave();
+  clearStats();
   res.json({ ok: true });
 }
 
@@ -2467,18 +2050,21 @@ for (const path of ["/v1/admin/stats/reset", "/service/metrics/reset"]) {
 // ---------------------------------------------------------------------------
 
 function listBackends(_req: Request, res: Response) {
-  const apiKey = getServiceAccessKey() ?? "";
-  const envConfigs = (() => {
-    const list: { label: string; url: string }[] = [];
-    const envKeys = ["FRIEND_PROXY_URL", ...Array.from({ length: 19 }, (_, i) => `FRIEND_PROXY_URL_${i + 2}`)];
-    for (const key of envKeys) { const url = process.env[key]; if (url) list.push({ label: key.replace("FRIEND_PROXY_URL", "FRIEND"), url }); }
-    return list;
-  })();
+  const allConfigs = getAllFriendProxyConfigs();
   res.json({
     local: { url: null, source: "local" },
-    env: envConfigs.map((c) => ({ ...c, source: "env", health: getCachedHealth(c.url) === false ? "down" : "healthy" })),
-    dynamic: dynamicBackends.map((d) => ({ ...d, source: "dynamic", health: getCachedHealth(d.url) === false ? "down" : "healthy" })),
-    apiKey,
+    env: allConfigs
+      .filter((config) => !isDynamicBackendLabel(config.label))
+      .map((config) => ({ label: config.label, url: config.url, source: "env", health: getCachedHealth(config.url) === false ? "down" : "healthy" })),
+    dynamic: allConfigs
+      .filter((config) => isDynamicBackendLabel(config.label))
+      .map((config) => ({
+        label: config.label,
+        url: config.url,
+        enabled: config.enabled,
+        source: "dynamic",
+        health: getCachedHealth(config.url) === false ? "down" : "healthy",
+      })),
   });
 }
 
@@ -2488,24 +2074,17 @@ function createBackend(req: Request, res: Response) {
     res.status(400).json({ error: "Valid https URL required" });
     return;
   }
-  const cleanUrl = url.replace(/\/+$/, "");
-  const normalizedUrl = normalizeSubNodeUrl(cleanUrl);
-  const allUrls = getFriendProxyConfigs().map((c) => c.url);
-  if (allUrls.includes(normalizedUrl)) { res.status(409).json({ error: "URL already in pool" }); return; }
-  const label = `DYNAMIC_${dynamicBackends.length + 1}`;
-  dynamicBackends.push({ label, url: cleanUrl });
-  saveDynamicBackends(dynamicBackends);
-  const apiKey = getServiceAccessKey() ?? "";
-  probeHealth(normalizedUrl, apiKey).then((ok) => setHealth(normalizedUrl, ok)).catch(() => setHealth(normalizedUrl, false));
-  res.json({ label, url: cleanUrl, source: "dynamic" });
+  try {
+    res.json(createDynamicBackend(url));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to create backend";
+    res.status(message === "URL already in pool" ? 409 : 500).json({ error: message });
+  }
 }
 
 function deleteBackend(req: Request, res: Response) {
   const { label } = req.params;
-  const before = dynamicBackends.length;
-  dynamicBackends = dynamicBackends.filter((d) => d.label !== label);
-  if (dynamicBackends.length === before) { res.status(404).json({ error: "Dynamic backend not found" }); return; }
-  saveDynamicBackends(dynamicBackends);
+  if (!deleteDynamicBackend(label)) { res.status(404).json({ error: "Dynamic backend not found" }); return; }
   res.json({ deleted: true, label });
 }
 
@@ -2514,10 +2093,8 @@ function updateBackend(req: Request, res: Response) {
   const { label } = req.params;
   const { enabled } = req.body as { enabled?: boolean };
   if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) required" }); return; }
-  const target = dynamicBackends.find((d) => d.label === label);
+  const target = updateDynamicBackend(label, enabled);
   if (!target) { res.status(404).json({ error: "Dynamic backend not found" }); return; }
-  target.enabled = enabled;
-  saveDynamicBackends(dynamicBackends);
   res.json({ label, enabled });
 }
 
@@ -2528,12 +2105,7 @@ function batchUpdateBackends(req: Request, res: Response) {
     res.status(400).json({ error: "labels (string[]) and enabled (boolean) required" });
     return;
   }
-  const set = new Set(labels);
-  let updated = 0;
-  for (const d of dynamicBackends) {
-    if (set.has(d.label)) { d.enabled = enabled; updated++; }
-  }
-  saveDynamicBackends(dynamicBackends);
+  const updated = batchUpdateDynamicBackends(labels, enabled);
   res.json({ updated, enabled });
 }
 
@@ -2549,16 +2121,12 @@ for (const path of ["/v1/admin/backends/:label", "/service/backends/:label"]) {
 }
 
 function getRouting(_req: Request, res: Response) {
-  res.json(routingSettings);
+  res.json(getRoutingSettings());
 }
 
 function updateRouting(req: Request, res: Response) {
-  const { localEnabled, localFallback, fakeStream } = req.body as Partial<RoutingSettings>;
-  if (typeof localEnabled === "boolean") routingSettings.localEnabled = localEnabled;
-  if (typeof localFallback === "boolean") routingSettings.localFallback = localFallback;
-  if (typeof fakeStream === "boolean") routingSettings.fakeStream = fakeStream;
-  saveRoutingSettings();
-  res.json(routingSettings);
+  const patch = req.body as Partial<RoutingSettings>;
+  res.json(updateRoutingSettings(patch));
 }
 
 for (const path of ["/v1/admin/routing", "/service/routing"]) {
@@ -2736,7 +2304,7 @@ async function handleFriendProxy({
   }
 
   const contentType = fetchRes.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json") && routingSettings.fakeStream) {
+  if (contentType.includes("application/json") && getRoutingSettings().fakeStream) {
     req.log.info("Friend returned JSON for stream request — fake-streaming");
     const json = await fetchRes.json() as Record<string, unknown>;
     const result = await fakeStreamResponse(res, json, startTime);
@@ -2872,7 +2440,7 @@ async function handleOpenAI({
       res.end();
       return { promptTokens, completionTokens, ttftMs };
     } catch (streamErr) {
-      if (res.headersSent || !routingSettings.fakeStream) throw streamErr;
+      if (res.headersSent || !getRoutingSettings().fakeStream) throw streamErr;
       req.log.warn({ err: streamErr }, "Real streaming failed, falling back to fake-stream");
       const result = await client.chat.completions.create({ ...params, stream: false });
       return fakeStreamResponse(res, result as unknown as Record<string, unknown>, startTime);
@@ -2993,7 +2561,7 @@ async function handleGemini({
       res.end();
       return { promptTokens, completionTokens, ttftMs };
     } catch (streamErr) {
-      if (res.headersSent || !routingSettings.fakeStream) throw streamErr;
+      if (res.headersSent || !getRoutingSettings().fakeStream) throw streamErr;
       req.log.warn({ err: streamErr }, "Gemini streaming failed, falling back to fake-stream");
       const response = await client.models.generateContent({
         model, contents,

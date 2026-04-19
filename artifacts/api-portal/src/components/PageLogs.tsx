@@ -92,8 +92,11 @@ export default function PageLogs({ baseUrl, apiKey }: { baseUrl: string; apiKey:
     abortRef.current = controller;
 
     try {
-      const response = await fetch(servicePaths.logsStream(baseUrl, apiKey), {
-        headers: { Accept: "text/event-stream" },
+      const response = await fetch(servicePaths.logsStream(baseUrl), {
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${apiKey}`,
+        },
         signal: controller.signal,
       });
 
