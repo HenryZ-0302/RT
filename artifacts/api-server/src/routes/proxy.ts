@@ -5,11 +5,10 @@ import { GoogleGenAI } from "@google/genai";
 import { createAdminRouter } from "./admin";
 import { createAnthropicRouter, handleClaude } from "./anthropic";
 import catalogRouter from "./catalog";
+import { createChatRouter } from "./chat";
 import { createGeminiRouter } from "./gemini";
 import { createImagesRouter } from "./images";
-import { requireApiKey } from "../middleware/auth";
 import {
-  type Backend,
   getRequestCounter,
   getRoutingSettings,
   initReady as backendPoolReady,
@@ -17,9 +16,12 @@ import {
   pickBackendExcluding,
   setHealth,
 } from "../services/backendPool";
+import { handleFriendChatProxy } from "../services/friendProxy";
 import {
   MODEL_REGISTRY,
   type ModelCapability,
+  getRegisteredModel,
+  hasRegisteredModel,
   isChatModel,
   isImageModel,
   isModelEnabled,
@@ -248,149 +250,6 @@ type OAIMessage =
   | { role: "assistant"; content: string | OAIContentPart[] | null; tool_calls?: OAIToolCall[] }
   | { role: "tool"; content: string; tool_call_id: string }
   | { role: string; content: string | OAIContentPart[] | null };
-
-async function handleChatCompletions(req: Request, res: Response) {
-  const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
-    model?: string;
-    messages: OAIMessage[];
-    stream?: boolean;
-    max_tokens?: number;
-    tools?: OAITool[];
-    tool_choice?: unknown;
-  };
-
-  // Reject disabled models early
-  if (model && !isModelEnabled(model)) {
-    res.status(403).json({ error: { message: `Model '${model}' is disabled on this service`, type: "invalid_request_error", code: "model_disabled" } });
-    return;
-  }
-  if (model && isImageModel(model)) {
-    res.status(400).json({
-      error: {
-        message: `Model '${model}' is image-only. Use /v1/images/generations or /v1beta/models/${model}:generateImages instead.`,
-        type: "invalid_request_error",
-        code: "wrong_model_capability",
-      },
-    });
-    return;
-  }
-
-  const selectedModel = model && isChatModel(model) ? model : "gpt-5.2";
-  const provider = MODEL_REGISTRY.get(selectedModel)?.provider ?? "openai";
-  const isClaudeModel = provider === "anthropic";
-  const isGeminiModel = provider === "gemini";
-  const isOpenRouterModel = provider === "openrouter";
-  const shouldStream = stream ?? false;
-  const startTime = Date.now();
-
-  const finalMessages = (isClaudeModel && getSillyTavernMode() && !tools?.length)
-    ? [...messages, { role: "user" as const, content: "继续" }]
-    : messages;
-
-  const MAX_FRIEND_RETRIES = 3;
-  const triedFriendUrls = new Set<string>();
-  let backend = pickBackend();
-  if (!backend) { res.status(503).json({ error: { message: "No available backends - all sub-nodes are down and local fallback is disabled", type: "service_unavailable" } }); return; }
-
-  for (let attempt = 0; ; attempt++) {
-    const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    req.log.info({ model: selectedModel, backend: backendLabel, attempt, counter: getRequestCounter() - 1, sillyTavern: isClaudeModel && getSillyTavernMode(), toolCount: tools?.length ?? 0 }, "Service request");
-
-    try {
-      let result: { promptTokens: number; completionTokens: number; ttftMs?: number };
-      if (backend.kind === "friend") {
-        triedFriendUrls.add(backend.url);
-        result = await handleFriendProxy({ req, res, backend, model: selectedModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
-      } else if (isClaudeModel) {
-        const { actualModel, thinkingEnabled, resolvedMaxTokens } = resolveClaudeThinkingModel(selectedModel, max_tokens);
-        const client = makeLocalAnthropic();
-        result = await handleClaude({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: resolvedMaxTokens, thinking: thinkingEnabled, tools, toolChoice: tool_choice, startTime });
-      } else if (isGeminiModel) {
-        const thinkingEnabled = selectedModel.endsWith("-thinking");
-        const actualModel = thinkingEnabled
-          ? selectedModel.replace(/-thinking$/, "")
-          : selectedModel;
-        result = await handleGemini({ req, res, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, thinking: thinkingEnabled, startTime });
-      } else if (isOpenRouterModel) {
-        const client = makeLocalOpenRouter();
-        result = await handleOpenAI({ req, res, client, model: selectedModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
-      } else {
-        const actualModel = selectedModel.endsWith("-thinking")
-          ? selectedModel.replace(/-thinking$/, "")
-          : selectedModel;
-        const client = makeLocalOpenAI();
-        result = await handleOpenAI({ req, res, client, model: actualModel, messages: finalMessages, stream: shouldStream, maxTokens: max_tokens, tools, toolChoice: tool_choice, startTime });
-      }
-      // ✅ Success — record stats, mark friend healthy, and exit retry loop
-      if (backend.kind === "friend") setHealth(backend.url, true);
-      const duration = Date.now() - startTime;
-      recordCallStat(backendLabel, duration, result.promptTokens, result.completionTokens, result.ttftMs, selectedModel);
-      pushRequestLog({
-        method: req.method, path: req.path, model: selectedModel,
-        backend: backendLabel, status: 200, duration, stream: shouldStream,
-        promptTokens: result.promptTokens, completionTokens: result.completionTokens,
-        level: "info",
-      });
-      break;
-    } catch (err: unknown) {
-      // ❌ Failure — record error, decide whether to retry on a different node
-      recordErrorStat(backendLabel);
-
-      const is5xx = err instanceof FriendProxyHttpError && err.status >= 500;
-      const errMsg = err instanceof Error ? err.message : "";
-      const isNetworkErr = err instanceof TypeError
-        || ["fetch", "aborted", "terminated", "closed", "upstream", "ECONNRESET", "socket hang up", "UND_ERR"]
-          .some((kw) => errMsg.includes(kw));
-
-      if (backend.kind === "friend" && (is5xx || isNetworkErr)) {
-        setHealth(backend.url, false);
-        req.log.warn({ url: backend.url, attempt, is5xx, isNetworkErr }, "Friend backend marked unhealthy, considering retry");
-
-        if (attempt < MAX_FRIEND_RETRIES && !res.headersSent) {
-          const next = pickBackendExcluding(triedFriendUrls);
-          if (next?.kind === "friend") {
-            backend = next;
-            continue; // retry with next friend node
-          }
-        }
-      }
-
-      req.log.error({ err }, "Service request failed");
-      const errStatus = (
-        err instanceof FriendProxyHttpError
-          ? err.status
-          : err instanceof HttpStatusError
-            ? err.status
-            : undefined
-      ) ?? 500;
-      const errType = errStatus >= 500 ? "server_error" : "invalid_request_error";
-      pushRequestLog({
-        method: req.method, path: req.path, model: selectedModel,
-        backend: backendLabel, status: errStatus, duration: Date.now() - startTime,
-        stream: shouldStream, level: errStatus >= 500 ? "error" : "warn",
-        error: errMsg || "Unknown error",
-      });
-      if (!res.headersSent) {
-        res.status(errStatus).json({ error: { message: errMsg || "Unknown error", type: errType } });
-      } else if (!res.writableEnded) {
-        writeAndFlush(res, `data: ${JSON.stringify({ error: { message: errMsg || "Unknown error" } })}\n\n`);
-        writeAndFlush(res, "data: [DONE]\n\n");
-        res.end();
-      }
-      break;
-    }
-  }
-}
-
-for (const path of ["/v1/chat/completions", "/service/chat"]) {
-  router.post(path, requireApiKey, handleChatCompletions);
-}
-
-// ---------------------------------------------------------------------------
-// Anthropic-native /v1/messages endpoint
-// Accepts Anthropic API format directly (for clients like Cherry Studio, Claude.ai compatible tools)
-// ---------------------------------------------------------------------------
-
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -458,160 +317,35 @@ router.use(createAnthropicRouter({
   pushRequestLog,
 }));
 
-// handleFriendProxy — raw fetch (bypasses SDK SSE parsing) so chunk.usage is
-// captured reliably regardless of the friend proxy's SDK version or chunk format.
-// SSE headers are committed only after the first chunk arrives, which preserves
-// the retry window in case the upstream connection fails immediately.
-async function handleFriendProxy({
-  req, res, backend, model, messages, stream, maxTokens, tools, toolChoice, startTime,
-}: {
-  req: Request;
-  res: Response;
-  backend: Extract<Backend, { kind: "friend" }>;
-  model: string;
-  messages: OAIMessage[];
-  stream: boolean;
-  maxTokens?: number;
-  tools?: OAITool[];
-  toolChoice?: unknown;
-  startTime: number;
-}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
-  const body: Record<string, unknown> = { model, messages, stream };
-  body["max_tokens"] = maxTokens ?? 16000; // always override sub-node's potentially low default
-  if (stream) body["stream_options"] = { include_usage: true };
-  if (tools?.length) body["tools"] = tools;
-  if (toolChoice !== undefined) body["tool_choice"] = toolChoice;
-
-  // ── Non-streaming (or fake-stream when client wants stream but we call non-stream) ──
-  if (!stream) {
-    const fetchRes = await fetch(`${backend.url}/v1/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!fetchRes.ok) {
-      const errText = await fetchRes.text().catch(() => "unknown");
-      throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
-    }
-    const json = await fetchRes.json() as Record<string, unknown>;
-    res.json(json);
-    const usage = json["usage"] as { prompt_tokens?: number; completion_tokens?: number } | null | undefined;
-    if ((usage?.prompt_tokens ?? 0) === 0) {
-      const inputChars = messages.reduce((acc, m) => {
-        if (typeof m.content === "string") return acc + m.content.length;
-        if (Array.isArray(m.content))
-          return acc + (m.content as Array<{ type: string; text?: string }>)
-            .filter((p) => p.type === "text").reduce((a, p) => a + (p.text?.length ?? 0), 0);
-        return acc;
-      }, 0);
-      const outputChars = (json["choices"] as Array<{ message?: { content?: string } }>)?.[0]?.message?.content?.length ?? 0;
-      return { promptTokens: Math.ceil(inputChars / 4), completionTokens: Math.ceil(outputChars / 4) };
-    }
-    return { promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0 };
-  }
-
-  // ── Streaming ────────────────────────────────────────────────────────────
-  const fetchRes = await fetch(`${backend.url}/v1/chat/completions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(600_000),
-  });
-
-  if (!fetchRes.ok) {
-    const errText = await fetchRes.text().catch(() => "unknown");
-    throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
-  }
-
-  const contentType = fetchRes.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json") && getRoutingSettings().fakeStream) {
-    req.log.info("Friend returned JSON for stream request — fake-streaming");
-    const json = await fetchRes.json() as Record<string, unknown>;
-    const result = await fakeStreamResponse(res, json, startTime);
-    if (result.promptTokens === 0) {
-      const inputChars = messages.reduce((acc, m) => {
-        if (typeof m.content === "string") return acc + m.content.length;
-        if (Array.isArray(m.content))
-          return acc + (m.content as Array<{ type: string; text?: string }>)
-            .filter((p) => p.type === "text").reduce((a, p) => a + (p.text?.length ?? 0), 0);
-        return acc;
-      }, 0);
-      const outputContent = ((json["choices"] as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ?? "").length;
-      return { promptTokens: Math.ceil(inputChars / 4), completionTokens: Math.ceil(outputContent / 4), ttftMs: result.ttftMs };
-    }
-    return result;
-  }
-
-  setSseHeaders(res);
-  const keepaliveTimer = setInterval(() => writeAndFlush(res, ": keep-alive\n\n"), 15_000);
-
-  let promptTokens = 0;
-  let completionTokens = 0;
-  let ttftMs: number | undefined;
-  let outputChars = 0;
-
-  try {
-
-    const reader = fetchRes.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trimEnd();
-          if (!trimmed.startsWith("data:")) continue;
-          const data = trimmed.slice(5).trim();
-          if (data === "[DONE]") { writeAndFlush(res, "data: [DONE]\n\n"); continue; }
-          try {
-            const chunk = JSON.parse(data) as Record<string, unknown>;
-            // Capture usage from any chunk that carries it
-            const usage = chunk["usage"] as { prompt_tokens?: number; completion_tokens?: number } | null | undefined;
-            if (usage && typeof usage === "object") {
-              promptTokens = usage.prompt_tokens ?? promptTokens;
-              completionTokens = usage.completion_tokens ?? completionTokens;
-            }
-            // Record TTFT + accumulate output chars for fallback estimation
-            const deltaContent = (chunk["choices"] as Array<{ delta?: { content?: string } }>)?.[0]?.delta?.content;
-            if (deltaContent) {
-              if (ttftMs === undefined) ttftMs = Date.now() - startTime;
-              outputChars += deltaContent.length;
-            }
-            writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
-          } catch { /* skip malformed chunk */ }
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  } finally {
-    clearInterval(keepaliveTimer);
-  }
-
-  res.end();
-
-  // Fallback: estimate tokens from char count when sub-node didn't return usage
-  if (promptTokens === 0) {
-    const inputChars = messages.reduce((acc, m) => {
-      if (typeof m.content === "string") return acc + m.content.length;
-      if (Array.isArray(m.content))
-        return acc + (m.content as Array<{ type: string; text?: string }>)
-          .filter((p) => p.type === "text").reduce((a, p) => a + (p.text?.length ?? 0), 0);
-      return acc;
-    }, 0);
-    promptTokens = Math.ceil(inputChars / 4);
-    completionTokens = Math.ceil(outputChars / 4);
-  }
-
-  return { promptTokens, completionTokens, ttftMs };
-}
+router.use(createChatRouter({
+  pickBackend,
+  pickBackendExcluding,
+  setHealth,
+  getRequestCounter,
+  getProviderForModel: (id) => MODEL_REGISTRY.get(id)?.provider ?? "openai",
+  isChatModel,
+  isImageModel,
+  isModelEnabled,
+  resolveClaudeThinkingModel,
+  getSillyTavernMode,
+  makeLocalAnthropic,
+  makeLocalOpenAI,
+  makeLocalOpenRouter,
+  handleFriendProxy: (args) => handleFriendChatProxy({
+    ...args,
+    fakeStreamEnabled: getRoutingSettings().fakeStream,
+    fakeStreamResponse,
+  }),
+  handleOpenAI,
+  handleGemini,
+  handleClaude,
+  isFriendProxyHttpError: (err): err is FriendProxyHttpError => err instanceof FriendProxyHttpError,
+  isHttpStatusError: (err): err is { status: number } => err instanceof HttpStatusError,
+  writeAndFlush,
+  recordCallStat,
+  recordErrorStat,
+  pushRequestLog,
+}));
 
 async function handleOpenAI({
   req, res, client, model, messages, stream, maxTokens, tools, toolChoice, startTime,
