@@ -4,9 +4,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import { createAdminRouter } from "./admin";
 import catalogRouter from "./catalog";
+import { createGeminiRouter } from "./gemini";
+import { createImagesRouter } from "./images";
 import { requireApiKey } from "../middleware/auth";
 import {
   type Backend,
+  getRequestCounter,
   getRoutingSettings,
   initReady as backendPoolReady,
   pickBackend,
@@ -17,7 +20,6 @@ import {
   CLAUDE_ADAPTIVE_THINKING_MODELS,
   CLAUDE_DEFAULT_THINKING_BUDGET,
   CLAUDE_MIN_THINKING_BUDGET,
-  GEMINI_BASE_MODELS,
   MODEL_REGISTRY,
   type ModelCapability,
   getRegisteredModel,
@@ -31,6 +33,7 @@ import {
   shouldForceClaudeSummarizedThinking,
 } from "../services/modelRegistry";
 import { pushRequestLog } from "../services/requestLogs";
+import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
 import { createStatsTracker } from "../services/stats";
 import { getSillyTavernMode } from "./settings";
 
@@ -175,40 +178,8 @@ function makeLocalOpenRouter(): OpenAI {
   return new OpenAI({ apiKey, baseURL });
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function setSseHeaders(res: Response) {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.flushHeaders();
-}
-
-function writeAndFlush(res: Response, data: string) {
-  res.write(data);
-  (res as unknown as { flush?: () => void }).flush?.();
-}
-
 function sanitizeThinkingText(raw: string): string {
   return raw.replace(/<\/?think>/g, "");
-}
-
-function isTimeoutLikeError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err ?? "");
-  return err instanceof DOMException
-    || /timeout|timed out|aborted|aborterror|und_err_connect_timeout/i.test(message);
-}
-
-function normalizeImageError(err: unknown, model: string): unknown {
-  if (err instanceof HttpStatusError) return err;
-  if (isTimeoutLikeError(err)) {
-    return new HttpStatusError(504, `Image generation timed out for '${model}'. Please retry in a moment.`);
-  }
-  return err;
 }
 
 function buildReasoningFields(reasoning: string): { reasoning: string; reasoning_content: string } {
@@ -346,39 +317,6 @@ type OAIMessage =
   | { role: "tool"; content: string; tool_call_id: string }
   | { role: string; content: string | OAIContentPart[] | null };
 
-type OAIImageGenerationRequest = {
-  model?: string;
-  prompt?: string;
-  image?: string;
-  images?: string[];
-  n?: number;
-  size?: string;
-  response_format?: "b64_json" | "url" | string;
-};
-
-type GeminiNativeImageRequest = {
-  prompt?: string;
-  image?: string;
-  images?: string[];
-  n?: number;
-  size?: string;
-  response_format?: "b64_json" | "url" | string;
-  contents?: unknown;
-  config?: Record<string, unknown>;
-};
-
-type GeminiNativeGenerateContentRequest = {
-  contents?: unknown;
-  config?: Record<string, unknown>;
-  generationConfig?: Record<string, unknown>;
-  systemInstruction?: unknown;
-  safetySettings?: unknown;
-  tools?: unknown;
-  toolConfig?: unknown;
-  cachedContent?: string;
-  [key: string]: unknown;
-};
-
 type AnthropicImageSource =
   | { type: "base64"; media_type: string; data: string }
   | { type: "url"; url: string };
@@ -411,162 +349,6 @@ function convertContentForClaude(content: string | OAIContentPart[] | null | und
     }
     return { type: "text", text: JSON.stringify(part) };
   });
-}
-
-function detectMimeTypeFromUrl(url: string): string {
-  const lower = url.toLowerCase();
-  if (lower.endsWith(".png")) return "image/png";
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".webp")) return "image/webp";
-  if (lower.endsWith(".gif")) return "image/gif";
-  return "image/png";
-}
-
-function parseDataUrl(url: string): { mimeType: string; data: string } | null {
-  const match = url.match(/^data:([^;,]+);base64,(.+)$/);
-  if (!match) return null;
-  return { mimeType: match[1], data: match[2] };
-}
-
-function mapOpenAIImageSize(size?: string): { aspectRatio?: string } {
-  switch (size) {
-    case undefined:
-    case "":
-    case "1024x1024":
-      return { aspectRatio: "1:1" };
-    case "1536x1024":
-      return { aspectRatio: "3:2" };
-    case "1024x1536":
-      return { aspectRatio: "2:3" };
-    case "1536x864":
-      return { aspectRatio: "16:9" };
-    case "864x1536":
-      return { aspectRatio: "9:16" };
-    default:
-      throw new HttpStatusError(
-        400,
-        `Unsupported image size '${size}'. Supported sizes: 1024x1024, 1536x1024, 1024x1536, 1536x864, 864x1536.`,
-      );
-  }
-}
-
-async function imageInputToPart(value: string): Promise<Record<string, unknown>> {
-  const dataUrl = parseDataUrl(value);
-  if (dataUrl) {
-    return { inlineData: { mimeType: dataUrl.mimeType, data: dataUrl.data } };
-  }
-
-  const response = await fetch(value, { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) {
-    throw new HttpStatusError(400, `Failed to fetch input image: HTTP ${response.status}`);
-  }
-  const mimeType = response.headers.get("content-type")?.split(";")[0] || detectMimeTypeFromUrl(value);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  return { inlineData: { mimeType, data: buffer.toString("base64") } };
-}
-
-async function imageInputToBlob(value: string): Promise<Blob> {
-  const dataUrl = parseDataUrl(value);
-  if (dataUrl) {
-    return new Blob([Buffer.from(dataUrl.data, "base64")], { type: dataUrl.mimeType });
-  }
-
-  const response = await fetch(value, { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) {
-    throw new HttpStatusError(400, `Failed to fetch input image: HTTP ${response.status}`);
-  }
-  const mimeType = response.headers.get("content-type")?.split(";")[0] || detectMimeTypeFromUrl(value);
-  return new Blob([Buffer.from(await response.arrayBuffer())], { type: mimeType });
-}
-
-async function buildGeminiImageContents(prompt: string, imageInputs: string[]): Promise<Record<string, unknown>[]> {
-  const parts: Record<string, unknown>[] = [];
-  for (const input of imageInputs) {
-    parts.push(await imageInputToPart(input));
-  }
-  parts.push({ text: prompt });
-  return [{ role: "user", parts }];
-}
-
-function extractGeneratedImages(response: {
-  candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }>;
-}): Array<{ mimeType: string; b64_json: string }> {
-  const parts = response.candidates?.[0]?.content?.parts ?? [];
-  const images: Array<{ mimeType: string; b64_json: string }> = [];
-  for (const part of parts) {
-    const inlineData = part.inlineData as { mimeType?: string; data?: string } | undefined;
-    if (inlineData?.data) {
-      images.push({
-        mimeType: inlineData.mimeType ?? "image/png",
-        b64_json: inlineData.data,
-      });
-    }
-  }
-  return images;
-}
-
-async function handleOpenAIImage({
-  model,
-  prompt,
-  imageInputs,
-  n,
-  size,
-}: {
-  model: string;
-  prompt: string;
-  imageInputs: string[];
-  n?: number;
-  size?: string;
-}): Promise<Record<string, unknown>> {
-  try {
-    const { apiKey, baseURL } = getLocalOpenAIConfig();
-    const normalizedBaseURL = baseURL.replace(/\/+$/, "");
-
-    if (imageInputs.length > 0) {
-      const form = new FormData();
-      form.set("model", model);
-      form.set("prompt", prompt);
-      if (typeof n === "number") form.set("n", String(Math.max(1, Math.min(4, Math.floor(n)))));
-      if (size) form.set("size", size);
-      for (let i = 0; i < imageInputs.length; i++) {
-        form.append("image", await imageInputToBlob(imageInputs[i]), `image-${i + 1}.png`);
-      }
-
-      const response = await fetch(`${normalizedBaseURL}/images/edits`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}` },
-        body: form,
-        signal: AbortSignal.timeout(180_000),
-      });
-      if (!response.ok) {
-        const errText = await response.text().catch(() => "unknown");
-        throw new HttpStatusError(response.status, `OpenAI image edit failed: ${errText}`);
-      }
-      return await response.json() as Record<string, unknown>;
-    }
-
-    const response = await fetch(`${normalizedBaseURL}/images/generations`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        prompt,
-        ...(typeof n === "number" ? { n: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
-        ...(size ? { size } : {}),
-      }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "unknown");
-      throw new HttpStatusError(response.status, `OpenAI image generation failed: ${errText}`);
-    }
-    return await response.json() as Record<string, unknown>;
-  } catch (err) {
-    throw normalizeImageError(err, model);
-  }
 }
 
 // Convert OpenAI tools array → Anthropic tools array
@@ -630,678 +412,6 @@ function convertMessagesForClaude(messages: OAIMessage[]): AnthropicMessage[] {
   return result;
 }
 
-async function handleGeminiImage({
-  model,
-  prompt,
-  imageInputs,
-  n,
-  size,
-  nativeConfig,
-  nativeContents,
-}: {
-  model: string;
-  prompt: string;
-  imageInputs: string[];
-  n?: number;
-  size?: string;
-  nativeConfig?: Record<string, unknown>;
-  nativeContents?: unknown;
-}): Promise<{
-  raw: Record<string, unknown>;
-  images: Array<{ mimeType: string; b64_json: string }>;
-}> {
-  try {
-    const client = makeLocalGemini();
-    const contents = nativeContents ?? await buildGeminiImageContents(prompt, imageInputs);
-    const sizeConfig = mapOpenAIImageSize(size);
-    const response = await client.models.generateContent({
-      model,
-      contents,
-      config: {
-        ...(nativeConfig ?? {}),
-        ...(sizeConfig.aspectRatio ? { aspectRatio: sizeConfig.aspectRatio } : {}),
-        ...(typeof n === "number" ? { numberOfImages: Math.max(1, Math.min(4, Math.floor(n))) } : {}),
-      },
-    });
-    const raw = response as unknown as Record<string, unknown>;
-    const images = extractGeneratedImages(raw as {
-      candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }>;
-    });
-    if (images.length === 0) {
-      throw new HttpStatusError(502, `Image model '${model}' returned no image output.`);
-    }
-    return { raw, images };
-  } catch (err) {
-    throw normalizeImageError(err, model);
-  }
-}
-
-async function handleFriendJsonProxy({
-  backend,
-  path,
-  body,
-  timeoutMs = 180_000,
-}: {
-  backend: Extract<Backend, { kind: "friend" }>;
-  path: string;
-  body: unknown;
-  timeoutMs?: number;
-}): Promise<Record<string, unknown>> {
-  const fetchRes = await fetch(`${backend.url}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!fetchRes.ok) {
-    const errText = await fetchRes.text().catch(() => "unknown");
-    throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
-  }
-  return await fetchRes.json() as Record<string, unknown>;
-}
-
-async function handleFriendSseProxy({
-  backend,
-  path,
-  body,
-  res,
-  timeoutMs = 180_000,
-}: {
-  backend: Extract<Backend, { kind: "friend" }>;
-  path: string;
-  body: unknown;
-  res: Response;
-  timeoutMs?: number;
-}): Promise<void> {
-  const fetchRes = await fetch(`${backend.url}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  if (!fetchRes.ok) {
-    const errText = await fetchRes.text().catch(() => "unknown");
-    throw new FriendProxyHttpError(fetchRes.status, `Peer backend error ${fetchRes.status}: ${errText}`);
-  }
-  if (!fetchRes.body) {
-    throw new HttpStatusError(502, "Peer backend returned no stream body.");
-  }
-
-  setSseHeaders(res);
-  const reader = fetchRes.body.getReader();
-  const decoder = new TextDecoder();
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) writeAndFlush(res, decoder.decode(value, { stream: true }));
-    }
-    const tail = decoder.decode();
-    if (tail) writeAndFlush(res, tail);
-  } finally {
-    reader.releaseLock();
-  }
-
-  res.end();
-}
-
-function normalizeGeminiNativeModel(rawModel: string): string {
-  return rawModel.startsWith("models/") ? rawModel.slice("models/".length) : rawModel;
-}
-
-function getEnabledGeminiNativeChatModel(rawModel: string): string {
-  const model = normalizeGeminiNativeModel(rawModel);
-  if (!GEMINI_BASE_MODELS.includes(model)) {
-    throw new HttpStatusError(400, `Model '${model}' is not a Gemini chat model.`);
-  }
-  if (!isModelEnabled(model)) {
-    throw new HttpStatusError(403, `Model '${model}' is disabled on this service.`);
-  }
-  return model;
-}
-
-function buildGeminiNativeConfig(body: GeminiNativeGenerateContentRequest): Record<string, unknown> | undefined {
-  const config: Record<string, unknown> = {
-    ...(body.config && typeof body.config === "object" ? body.config : {}),
-    ...(body.generationConfig && typeof body.generationConfig === "object" ? body.generationConfig : {}),
-  };
-
-  if (body.systemInstruction !== undefined) config.systemInstruction = body.systemInstruction;
-  if (body.safetySettings !== undefined) config.safetySettings = body.safetySettings;
-  if (body.tools !== undefined) config.tools = body.tools;
-  if (body.toolConfig !== undefined) config.toolConfig = body.toolConfig;
-  if (body.cachedContent !== undefined) config.cachedContent = body.cachedContent;
-
-  return Object.keys(config).length > 0 ? config : undefined;
-}
-
-function buildGeminiNativeGenerateArgs(model: string, body: GeminiNativeGenerateContentRequest): Record<string, unknown> {
-  const config = buildGeminiNativeConfig(body);
-  return {
-    model,
-    contents: body.contents ?? [],
-    ...(config ? { config } : {}),
-  };
-}
-
-function estimateGeminiNativeTokensFromContents(contents: unknown): number {
-  const visited = new Set<unknown>();
-
-  const walk = (value: unknown): number => {
-    if (value === null || value === undefined) return 0;
-    if (typeof value === "string") return value.length;
-    if (typeof value === "number" || typeof value === "boolean") return String(value).length;
-    if (typeof value !== "object") return 0;
-    if (visited.has(value)) return 0;
-    visited.add(value);
-
-    if (Array.isArray(value)) return value.reduce((sum, item) => sum + walk(item), 0);
-
-    return Object.values(value as Record<string, unknown>).reduce((sum, item) => sum + walk(item), 0);
-  };
-
-  return Math.max(1, Math.ceil(walk(contents) / 4));
-}
-
-async function generateOpenAICompatibleImageResponse(
-  req: Request,
-  body: OAIImageGenerationRequest,
-): Promise<Record<string, unknown>> {
-  if (body.model && !hasRegisteredModel(body.model)) {
-    throw new HttpStatusError(400, `Unknown model '${body.model}'.`);
-  }
-  const selectedModel = body.model ?? "gemini-2.5-flash-image";
-  const modelInfo = getRegisteredModel(selectedModel);
-  if (!modelInfo || modelInfo.capability !== "image") {
-    throw new HttpStatusError(400, `Model '${selectedModel}' is not an image generation model.`);
-  }
-  if (!isModelEnabled(selectedModel)) {
-    throw new HttpStatusError(403, `Model '${selectedModel}' is disabled on this service.`);
-  }
-  if (body.response_format && body.response_format !== "b64_json") {
-    throw new HttpStatusError(400, "This service only supports response_format 'b64_json' for image generation.");
-  }
-  const prompt = body.prompt?.trim();
-  if (!prompt) {
-    throw new HttpStatusError(400, "prompt is required.");
-  }
-  const imageInputs = [
-    ...(typeof body.image === "string" ? [body.image] : []),
-    ...(Array.isArray(body.images) ? body.images.filter((item): item is string => typeof item === "string" && item.length > 0) : []),
-  ];
-  const provider = modelInfo.provider;
-
-  const startTime = Date.now();
-  let backend = pickBackend();
-  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
-
-  const triedFriendUrls = new Set<string>();
-  for (let attempt = 0; ; attempt++) {
-    const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    try {
-      let responseJson: Record<string, unknown>;
-      if (backend.kind === "friend") {
-        triedFriendUrls.add(backend.url);
-        responseJson = await handleFriendJsonProxy({
-          backend,
-          path: "/v1/images/generations",
-          body: {
-            model: selectedModel,
-            prompt,
-            image: body.image,
-            images: body.images,
-            n: body.n,
-            size: body.size,
-            response_format: "b64_json",
-          },
-        });
-      } else {
-        if (provider === "openai") {
-          responseJson = await handleOpenAIImage({
-            model: selectedModel,
-            prompt,
-            imageInputs,
-            n: body.n,
-            size: body.size,
-          });
-        } else {
-          const result = await handleGeminiImage({
-            model: selectedModel,
-            prompt,
-            imageInputs,
-            n: body.n,
-            size: body.size,
-          });
-          responseJson = {
-            created: Math.floor(Date.now() / 1000),
-            data: result.images.map((image) => ({ b64_json: image.b64_json, mime_type: image.mimeType })),
-          };
-        }
-      }
-
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") setHealth(backend.url, true);
-      recordImageCallStat(backendLabel, duration, selectedModel);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "image",
-        backend: backendLabel,
-        status: 200,
-        duration,
-        stream: false,
-        level: "info",
-      });
-      return responseJson;
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") {
-        setHealth(backend.url, false);
-        const status = err instanceof FriendProxyHttpError ? err.status : 502;
-        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-          backend = pickBackendExcluding(triedFriendUrls);
-          if (backend && attempt < 3) continue;
-        }
-      }
-      const status = err instanceof HttpStatusError
-        ? err.status
-        : err instanceof FriendProxyHttpError
-          ? err.status
-          : 500;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "image",
-        backend: backend.kind === "local" ? "local" : backend.label,
-        status,
-        duration,
-        stream: false,
-        level: status >= 500 ? "error" : "warn",
-        error: message,
-      });
-      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
-      throw err;
-    }
-  }
-}
-
-async function handleOpenAIImageGeneration(req: Request, res: Response) {
-  const body = req.body as OAIImageGenerationRequest;
-  if (body.response_format && body.response_format !== "b64_json") {
-    throw new HttpStatusError(400, "This service only supports response_format 'b64_json' for image generation.");
-  }
-  const responseJson = await generateOpenAICompatibleImageResponse(req, body);
-  res.json(responseJson);
-}
-
-async function handleGeminiNativeImage(req: Request, res: Response) {
-  const params = req.body as GeminiNativeImageRequest;
-  const selectedModel = req.params.model;
-  const modelInfo = getRegisteredModel(selectedModel);
-  if (!modelInfo || modelInfo.capability !== "image") {
-    throw new HttpStatusError(400, `Model '${selectedModel}' is not an image generation model.`);
-  }
-  if (!isModelEnabled(selectedModel)) {
-    throw new HttpStatusError(403, `Model '${selectedModel}' is disabled on this service.`);
-  }
-  if (params.response_format && params.response_format !== "b64_json") {
-    throw new HttpStatusError(400, "This service only supports base64 image output.");
-  }
-  const prompt = params.prompt?.trim() || "Generate an image.";
-  const imageInputs = [
-    ...(typeof params.image === "string" ? [params.image] : []),
-    ...(Array.isArray(params.images) ? params.images.filter((item): item is string => typeof item === "string" && item.length > 0) : []),
-  ];
-  const startTime = Date.now();
-  let backend = pickBackend();
-  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
-  const triedFriendUrls = new Set<string>();
-
-  for (let attempt = 0; ; attempt++) {
-    const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    try {
-      let responseJson: Record<string, unknown>;
-      if (backend.kind === "friend") {
-        triedFriendUrls.add(backend.url);
-        responseJson = await handleFriendJsonProxy({
-          backend,
-          path: `/v1beta/models/${selectedModel}:generateImages`,
-          body: params,
-        });
-      } else {
-        const result = await handleGeminiImage({
-          model: selectedModel,
-          prompt,
-          imageInputs,
-          n: params.n,
-          size: params.size,
-          nativeConfig: params.config,
-          nativeContents: params.contents,
-        });
-        responseJson = {
-          model: selectedModel,
-          generatedImages: result.images.map((image) => ({
-            image: {
-              mimeType: image.mimeType,
-              imageBytes: image.b64_json,
-            },
-          })),
-        };
-      }
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") setHealth(backend.url, true);
-      recordImageCallStat(backendLabel, duration, selectedModel);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "image",
-        backend: backendLabel,
-        status: 200,
-        duration,
-        stream: false,
-        level: "info",
-      });
-      res.json(responseJson);
-      return;
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") {
-        setHealth(backend.url, false);
-        const status = err instanceof FriendProxyHttpError ? err.status : 502;
-        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-          backend = pickBackendExcluding(triedFriendUrls);
-          if (backend && attempt < 3) continue;
-        }
-      }
-      const status = err instanceof HttpStatusError
-        ? err.status
-        : err instanceof FriendProxyHttpError
-          ? err.status
-          : 500;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "image",
-        backend: backend.kind === "local" ? "local" : backend.label,
-        status,
-        duration,
-        stream: false,
-        level: status >= 500 ? "error" : "warn",
-        error: message,
-      });
-      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
-      throw err;
-    }
-  }
-}
-
-async function handleGeminiNativeGenerateContent(req: Request, res: Response) {
-  const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
-  const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
-  const startTime = Date.now();
-  let backend = pickBackend();
-  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
-  const triedFriendUrls = new Set<string>();
-
-  for (let attempt = 0; ; attempt++) {
-    const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    try {
-      let responseJson: Record<string, unknown>;
-      if (backend.kind === "friend") {
-        triedFriendUrls.add(backend.url);
-        responseJson = await handleFriendJsonProxy({
-          backend,
-          path: `/v1beta/models/${selectedModel}:generateContent`,
-          body,
-        });
-      } else {
-        const client = makeLocalGemini();
-        responseJson = await (client.models as unknown as {
-          generateContent: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
-        }).generateContent(buildGeminiNativeGenerateArgs(selectedModel, body));
-      }
-
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") setHealth(backend.url, true);
-      const usage = responseJson["usageMetadata"] as { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
-      recordCallStat(
-        backendLabel,
-        duration,
-        usage?.promptTokenCount ?? estimateGeminiNativeTokensFromContents(body.contents),
-        usage?.candidatesTokenCount ?? 0,
-        undefined,
-        selectedModel,
-      );
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "chat",
-        backend: backendLabel,
-        status: 200,
-        duration,
-        stream: false,
-        promptTokens: usage?.promptTokenCount,
-        completionTokens: usage?.candidatesTokenCount,
-        level: "info",
-      });
-      res.json(responseJson);
-      return;
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") {
-        setHealth(backend.url, false);
-        const status = err instanceof FriendProxyHttpError ? err.status : 502;
-        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-          backend = pickBackendExcluding(triedFriendUrls);
-          if (backend && attempt < 3) continue;
-        }
-      }
-      const status = err instanceof HttpStatusError
-        ? err.status
-        : err instanceof FriendProxyHttpError
-          ? err.status
-          : 500;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "chat",
-        backend: backend.kind === "local" ? "local" : backend.label,
-        status,
-        duration,
-        stream: false,
-        level: status >= 500 ? "error" : "warn",
-        error: message,
-      });
-      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
-      throw err;
-    }
-  }
-}
-
-async function handleGeminiNativeStreamGenerateContent(req: Request, res: Response) {
-  const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
-  const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
-  const startTime = Date.now();
-  let backend = pickBackend();
-  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
-  const triedFriendUrls = new Set<string>();
-
-  for (let attempt = 0; ; attempt++) {
-    const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    try {
-      if (backend.kind === "friend") {
-        triedFriendUrls.add(backend.url);
-        await handleFriendSseProxy({
-          backend,
-          path: `/v1beta/models/${selectedModel}:streamGenerateContent`,
-          body,
-          res,
-        });
-      } else {
-        const client = makeLocalGemini();
-        const streamResponse = await (client.models as unknown as {
-          generateContentStream: (args: Record<string, unknown>) => Promise<AsyncIterable<Record<string, unknown>>>;
-        }).generateContentStream(buildGeminiNativeGenerateArgs(selectedModel, body));
-        setSseHeaders(res);
-        for await (const chunk of streamResponse) {
-          writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
-        }
-        res.end();
-      }
-
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") setHealth(backend.url, true);
-      recordCallStat(
-        backendLabel,
-        duration,
-        estimateGeminiNativeTokensFromContents(body.contents),
-        0,
-        undefined,
-        selectedModel,
-      );
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "chat",
-        backend: backendLabel,
-        status: 200,
-        duration,
-        stream: true,
-        level: "info",
-      });
-      return;
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") {
-        setHealth(backend.url, false);
-        const status = err instanceof FriendProxyHttpError ? err.status : 502;
-        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-          backend = pickBackendExcluding(triedFriendUrls);
-          if (backend && attempt < 3 && !res.headersSent) continue;
-        }
-      }
-      const status = err instanceof HttpStatusError
-        ? err.status
-        : err instanceof FriendProxyHttpError
-          ? err.status
-          : 500;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "chat",
-        backend: backend.kind === "local" ? "local" : backend.label,
-        status,
-        duration,
-        stream: true,
-        level: status >= 500 ? "error" : "warn",
-        error: message,
-      });
-      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
-      throw err;
-    }
-  }
-}
-
-async function handleGeminiNativeCountTokens(req: Request, res: Response) {
-  const body = (req.body ?? {}) as GeminiNativeGenerateContentRequest;
-  const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
-  const startTime = Date.now();
-  let backend = pickBackend();
-  if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
-  const triedFriendUrls = new Set<string>();
-
-  for (let attempt = 0; ; attempt++) {
-    const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    try {
-      let responseJson: Record<string, unknown>;
-      if (backend.kind === "friend") {
-        triedFriendUrls.add(backend.url);
-        responseJson = await handleFriendJsonProxy({
-          backend,
-          path: `/v1beta/models/${selectedModel}:countTokens`,
-          body,
-        });
-      } else {
-        const client = makeLocalGemini();
-        const modelApi = client.models as unknown as Record<string, unknown>;
-        const countTokens = modelApi["countTokens"];
-        if (typeof countTokens === "function") {
-          responseJson = await (countTokens as (args: Record<string, unknown>) => Promise<Record<string, unknown>>)({
-            model: selectedModel,
-            contents: body.contents ?? [],
-          });
-        } else {
-          responseJson = { totalTokens: estimateGeminiNativeTokensFromContents(body.contents) };
-        }
-      }
-
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") setHealth(backend.url, true);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "chat",
-        backend: backendLabel,
-        status: 200,
-        duration,
-        stream: false,
-        level: "info",
-      });
-      res.json(responseJson);
-      return;
-    } catch (err) {
-      const duration = Date.now() - startTime;
-      if (backend.kind === "friend") {
-        setHealth(backend.url, false);
-        const status = err instanceof FriendProxyHttpError ? err.status : 502;
-        if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-          backend = pickBackendExcluding(triedFriendUrls);
-          if (backend && attempt < 3) continue;
-        }
-      }
-      const status = err instanceof HttpStatusError
-        ? err.status
-        : err instanceof FriendProxyHttpError
-          ? err.status
-          : 500;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      recordErrorStat(backend.kind === "local" ? "local" : backend.label);
-      pushRequestLog({
-        method: req.method,
-        path: req.path,
-        model: selectedModel,
-        capability: "chat",
-        backend: backend.kind === "local" ? "local" : backend.label,
-        status,
-        duration,
-        stream: false,
-        level: status >= 500 ? "error" : "warn",
-        error: message,
-      });
-      if (err && typeof err === "object") (err as { __logged?: boolean }).__logged = true;
-      throw err;
-    }
-  }
-}
-
 async function handleChatCompletions(req: Request, res: Response) {
   const { model, messages, stream, max_tokens, tools, tool_choice } = req.body as {
     model?: string;
@@ -1347,7 +457,7 @@ async function handleChatCompletions(req: Request, res: Response) {
 
   for (let attempt = 0; ; attempt++) {
     const backendLabel = backend.kind === "local" ? "local" : backend.label;
-    req.log.info({ model: selectedModel, backend: backendLabel, attempt, counter: requestCounter - 1, sillyTavern: isClaudeModel && getSillyTavernMode(), toolCount: tools?.length ?? 0 }, "Service request");
+    req.log.info({ model: selectedModel, backend: backendLabel, attempt, counter: getRequestCounter() - 1, sillyTavern: isClaudeModel && getSillyTavernMode(), toolCount: tools?.length ?? 0 }, "Service request");
 
     try {
       let result: { promptTokens: number; completionTokens: number; ttftMs?: number };
@@ -1438,82 +548,6 @@ async function handleChatCompletions(req: Request, res: Response) {
 for (const path of ["/v1/chat/completions", "/service/chat"]) {
   router.post(path, requireApiKey, handleChatCompletions);
 }
-
-router.post("/v1/images/generations", requireApiKey, async (req, res) => {
-  try {
-    await handleOpenAIImageGeneration(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post("/v1beta/models/:model/generateImages", requireApiKey, async (req, res) => {
-  try {
-    await handleGeminiNativeImage(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post(/^\/v1beta\/models\/([^:]+):generateImages$/, requireApiKey, async (req, res) => {
-  try {
-    req.params.model = req.params[0];
-    await handleGeminiNativeImage(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post("/v1beta/models/:model/generateContent", requireApiKey, async (req, res) => {
-  try {
-    await handleGeminiNativeGenerateContent(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post(/^\/v1beta\/models\/([^:]+):generateContent$/, requireApiKey, async (req, res) => {
-  try {
-    req.params.model = req.params[0];
-    await handleGeminiNativeGenerateContent(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post("/v1beta/models/:model/streamGenerateContent", requireApiKey, async (req, res) => {
-  try {
-    await handleGeminiNativeStreamGenerateContent(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post(/^\/v1beta\/models\/([^:]+):streamGenerateContent$/, requireApiKey, async (req, res) => {
-  try {
-    req.params.model = req.params[0];
-    await handleGeminiNativeStreamGenerateContent(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post("/v1beta/models/:model/countTokens", requireApiKey, async (req, res) => {
-  try {
-    await handleGeminiNativeCountTokens(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
-
-router.post(/^\/v1beta\/models\/([^:]+):countTokens$/, requireApiKey, async (req, res) => {
-  try {
-    req.params.model = req.params[0];
-    await handleGeminiNativeCountTokens(req, res);
-  } catch (err) {
-    sendApiError(req, res, err);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Anthropic-native /v1/messages endpoint
@@ -1684,22 +718,6 @@ for (const path of ["/v1/messages", "/service/messages"]) {
 // Handlers
 // ---------------------------------------------------------------------------
 
-// Distinguishes upstream HTTP errors (5xx) from network/timeout errors so the
-// retry logic can make the right decision about whether to try another node.
-class HttpStatusError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-    this.name = "HttpStatusError";
-  }
-}
-
-class FriendProxyHttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-    this.name = "FriendProxyHttpError";
-  }
-}
-
 function sendApiError(_req: Request, res: Response, err: unknown): void {
   const status = err instanceof HttpStatusError
     ? err.status
@@ -1729,6 +747,32 @@ function sendApiError(_req: Request, res: Response, err: unknown): void {
     });
   }
 }
+
+router.use(createImagesRouter({
+  getLocalOpenAIConfig,
+  makeLocalGemini,
+  pickBackend,
+  pickBackendExcluding,
+  setHealth,
+  hasRegisteredModel,
+  getRegisteredModel,
+  isModelEnabled,
+  recordImageCallStat,
+  recordErrorStat,
+  pushRequestLog,
+  sendApiError,
+}));
+
+router.use(createGeminiRouter({
+  makeLocalGemini,
+  pickBackend,
+  pickBackendExcluding,
+  setHealth,
+  recordCallStat,
+  recordErrorStat,
+  pushRequestLog,
+  sendApiError,
+}));
 
 // handleFriendProxy — raw fetch (bypasses SDK SSE parsing) so chunk.usage is
 // captured reliably regardless of the friend proxy's SDK version or chunk format.

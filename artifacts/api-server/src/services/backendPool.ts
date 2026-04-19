@@ -195,6 +195,10 @@ export function pickBackendExcluding(exclude: Set<string>): Backend | null {
   return null;
 }
 
+export function getRequestCounter(): number {
+  return requestCounter;
+}
+
 export function getRoutingSettings(): RoutingSettings {
   return { ...routingSettings };
 }
