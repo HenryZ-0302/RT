@@ -16,17 +16,17 @@ interface SetupStatus {
 }
 
 function buildSetupPrompt(
-  apiKey: string | null,
   options: { needKey: boolean; needIntegrations: boolean; needStorage: boolean },
 ): string {
   const steps: string[] = [];
   let step = 0;
 
-  if (options.needKey && apiKey) {
+  if (options.needKey) {
     steps.push(
-      `步骤 ${++step}：写入服务访问密钥\n` +
-      `请在平台 Secrets 中创建如下键值，并保持原样：\n` +
-      `${SERVICE_KEY_ENV} = ${apiKey}`,
+      `步骤 ${++step}：设置服务访问密钥\n` +
+      `由于平台安全限制，你不能直接写入 Secret。请触发平台的 Secret 输入流程，让我手动填写以下键值：\n` +
+      `${SERVICE_KEY_ENV} = <由我在弹窗中输入自定义密钥>\n` +
+      `不要要求我先在网页里输入这个值，也不要要求我在聊天里重复发送这个值。`,
     );
   }
 
@@ -115,8 +115,6 @@ function StatusItem({ label, ready }: { label: string; ready: boolean }) {
 export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [checking, setChecking] = useState(true);
-  const [keyInput, setKeyInput] = useState("");
-  const [chosenKey, setChosenKey] = useState<string | null>(null);
 
   const checkSetupStatus = useCallback(async () => {
     setChecking(true);
@@ -146,25 +144,15 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
       return STORAGE_ONLY_PROMPT;
     }
 
-    const needKey = !status.configured;
-    if (needKey && !chosenKey) return "";
-
-    return buildSetupPrompt(chosenKey, {
-      needKey,
+    return buildSetupPrompt({
+      needKey: !status.configured,
       needIntegrations: !status.integrationsReady,
       needStorage: !status.storageReady,
     });
-  }, [chosenKey, status]);
-
-  const handleKeyConfirm = () => {
-    const value = keyInput.trim();
-    if (!value) return;
-    setChosenKey(value);
-  };
+  }, [status]);
 
   const isComplete = !!status?.configured && !!status.integrationsReady && !!status.storageReady;
-  const showKeyStep = !!status && !status.configured;
-  const showPrompt = !!status && !isComplete && (!!prompt || (showKeyStep && !!chosenKey));
+  const showPrompt = !!status && !isComplete && !!prompt;
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-background/80 p-4 backdrop-blur-md">
@@ -226,37 +214,20 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
             </div>
           )}
 
-          {showKeyStep && !chosenKey && (
+          {!!status && !status.configured && (
             <div className="rounded-xl border border-border/60 bg-secondary/20 p-4">
-              <div className="mb-2 text-sm font-medium">步骤 1：设置服务访问密钥</div>
+              <div className="mb-2 text-sm font-medium">服务访问密钥说明</div>
               <p className="mb-3 text-xs text-muted-foreground">
-                先定义一个门户登录和接口调用共用的访问密码，后面会直接写进 {SERVICE_KEY_ENV}。
+                由于 Replit 平台限制，Agent 不能直接写入 {SERVICE_KEY_ENV}。向导会直接生成提示词，
+                由 Agent 触发 Secret 弹窗，再由你手动输入想要的密钥，不再需要先在网页里输入一次。
               </p>
-              <div className="flex gap-2">
-                <input
-                  autoFocus
-                  type="text"
-                  value={keyInput}
-                  onChange={(event) => setKeyInput(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === "Enter") handleKeyConfirm(); }}
-                  placeholder="输入你定义的服务访问密钥"
-                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
-                />
-                <button
-                  onClick={handleKeyConfirm}
-                  disabled={!keyInput.trim()}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                >
-                  确认
-                </button>
-              </div>
             </div>
           )}
 
           {showPrompt && (
             <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/20 p-4">
               <div>
-                <div className="text-sm font-medium">步骤 {showKeyStep ? "2" : "1"}：执行补全配置</div>
+                <div className="text-sm font-medium">执行补全配置</div>
                 <p className="text-xs text-muted-foreground">
                   把下面整段指令发给平台 Agent。执行并重启工作流后，再点上面的“重新检测”。
                 </p>
@@ -276,7 +247,7 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
               关闭
             </button>
             <button
-              onClick={() => onComplete(chosenKey ?? undefined)}
+              onClick={() => onComplete()}
               disabled={!isComplete}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
