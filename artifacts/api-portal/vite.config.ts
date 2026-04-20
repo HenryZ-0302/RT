@@ -2,6 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { cartographer } from "@replit/vite-plugin-cartographer";
+import { devBanner } from "@replit/vite-plugin-dev-banner";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 const rawPort = process.env.PORT ?? "3000";
@@ -14,6 +16,8 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH ?? "/";
 const apiProxyTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8080";
+const enableReplitDevPlugins =
+  process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined;
 
 export default defineConfig({
   base: basePath,
@@ -21,17 +25,12 @@ export default defineConfig({
     react(),
     tailwindcss(),
     runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
+    ...(enableReplitDevPlugins
       ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
-            }),
-          ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
+          cartographer({
+            root: path.resolve(import.meta.dirname, ".."),
+          }),
+          devBanner(),
         ]
       : []),
   ],
