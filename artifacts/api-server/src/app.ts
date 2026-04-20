@@ -4,7 +4,6 @@ import pinoHttp from "pino-http";
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import router from "./routes";
-import proxyRouter from "./routes/proxy";
 import { logger } from "./lib/logger";
 import { safeVersionHeader } from "./routes/update";
 
@@ -32,7 +31,6 @@ const PROXY_VERSION: string = (() => {
 // Stamp every response with the sanitized version — safe to set as HTTP header.
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Service-Version", PROXY_VERSION);
-  res.setHeader("X-Proxy-Version", PROXY_VERSION);
   next();
 });
 
@@ -60,6 +58,5 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use("/api", router);
-app.use("/api", proxyRouter);
 
 export default app;

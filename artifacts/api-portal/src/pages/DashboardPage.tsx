@@ -27,7 +27,6 @@ export function DashboardPage({
 }: {
   baseUrl: string;
   displayUrl: string;
-  apiKey: string;
 }) {
   const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
   const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>("checking");

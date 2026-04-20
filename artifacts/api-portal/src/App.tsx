@@ -420,7 +420,6 @@ export default function App() {
               <DashboardPage
                 baseUrl={baseUrl}
                 displayUrl={displayUrl}
-                apiKey={apiKey}
               />
             </Route>
             <Route path="/stats">

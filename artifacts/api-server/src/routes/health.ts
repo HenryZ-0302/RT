@@ -191,21 +191,10 @@ async function recordHealthHistory(req: Request, res: Response) {
   res.json(history);
 }
 
-for (const path of ["/healthz", "/service/status"]) {
-  router.get(path, sendHealth);
-}
-
-for (const path of ["/healthcheck", "/service/healthcheck"]) {
-  router.get(path, sendHealthcheck);
-}
-
-for (const path of ["/service/healthcheck/history"]) {
-  router.get(path, sendHealthHistory);
-  router.post(path, recordHealthHistory);
-}
-
-for (const path of ["/setup-status", "/service/bootstrap"]) {
-  router.get(path, sendBootstrap);
-}
+router.get("/service/status", sendHealth);
+router.get("/service/healthcheck", sendHealthcheck);
+router.get("/service/healthcheck/history", sendHealthHistory);
+router.post("/service/healthcheck/history", recordHealthHistory);
+router.get("/service/bootstrap", sendBootstrap);
 
 export default router;

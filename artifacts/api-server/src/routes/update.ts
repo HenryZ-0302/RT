@@ -132,17 +132,13 @@ const BUNDLE_INCLUDE_FILES = [
   "artifacts/api-portal/package.json",
   "artifacts/api-portal/tsconfig.json",
   "artifacts/api-portal/vite.config.ts",
-  "artifacts/api-portal/components.json",
   "artifacts/api-server/package.json",
   "artifacts/api-server/tsconfig.json",
   "package.json",
   "pnpm-workspace.yaml",
   "tsconfig.json",
   "tsconfig.base.json",
-  ".npmrc",
-  ".replitignore",
   "README.md",
-  "replit.md",
 ];
 
 const BUNDLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml"]);
@@ -364,20 +360,9 @@ function sendUpdateStatus(_req: Request, res: Response) {
   });
 }
 
-for (const path of ["/update/version", "/service/release"]) {
-  router.get(path, sendVersion);
-}
-
-for (const path of ["/update/bundle", "/service/release/bundle"]) {
-  router.get(path, sendBundle);
-}
-
-for (const path of ["/update/apply", "/service/release/apply"]) {
-  router.post(path, applyUpdate);
-}
-
-for (const path of ["/update/status", "/service/release/status"]) {
-  router.get(path, sendUpdateStatus);
-}
+router.get("/service/release", sendVersion);
+router.get("/service/release/bundle", sendBundle);
+router.post("/service/release/apply", applyUpdate);
+router.get("/service/release/status", sendUpdateStatus);
 
 export default router;
