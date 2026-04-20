@@ -14,18 +14,14 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@google-cloud/storage": "^7.19.0",
     "@google/genai": "^1.48.0",
-    "cookie-parser": "^1.4.7",
     "cors": "^2",
-    "drizzle-orm": "catalog:",
     "express": "^5",
-    "google-auth-library": "^10.6.2",
     "openai": "^6.33.0",
     "pino": "^9",
     "pino-http": "^10",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "catalog:",
