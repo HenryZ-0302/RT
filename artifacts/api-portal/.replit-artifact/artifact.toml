@@ -2,7 +2,7 @@ kind = "web"
 previewPath = "/"
 title = "API Portal"
 version = "1.0.0"
-id = "artifacts/api-portal"
+id = "Q8mR_2LpVzN4xYcT7KjHs"
 router = "path"
 
 [[integratedSkills]]
