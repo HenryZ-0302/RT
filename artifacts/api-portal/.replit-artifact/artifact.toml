@@ -10,7 +10,7 @@ name = "react-vite"
 version = "1.0.0"
 
 [[services]]
-name = "web"
+name = "API Portal"
 paths = [ "/" ]
 localPort = 3000
 

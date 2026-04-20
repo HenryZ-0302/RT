@@ -59,7 +59,7 @@ function buildSetupPrompt(
     `${steps.join("\n\n")}\n\n` +
     `完成后请重启这两个工作流：\n` +
     `- artifacts/api-server: API Server\n` +
-    `- artifacts/api-portal: web`
+    `- artifacts/api-portal: API Portal`
   );
 }
 
@@ -68,7 +68,7 @@ const STORAGE_ONLY_PROMPT =
   `请在 code_execution 工具中执行：\n` +
   `const result = await setupObjectStorage();\n` +
   `console.log(JSON.stringify(result));\n\n` +
-  `完成后重启 "artifacts/api-server: API Server" 和 "artifacts/api-portal: web"。`;
+  `完成后重启 "artifacts/api-server: API Server" 和 "artifacts/api-portal: API Portal"。`;
 
 function CopyableBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
