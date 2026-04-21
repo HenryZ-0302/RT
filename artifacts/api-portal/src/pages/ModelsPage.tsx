@@ -59,6 +59,8 @@ export const OPENAI_MODELS: ModelEntry[] = [
 ];
 
 export const ANTHROPIC_MODELS: ModelEntry[] = [
+  { id: "claude-opus-4-7", label: "Claude Opus 4.7", provider: "anthropic", desc: "Anthropic 最新 Opus，适合高难度编码、代理编排和复杂推理", context: "1M", badge: "tools" },
+  { id: "claude-opus-4-7-thinking", label: "Claude Opus 4.7 (thinking)", provider: "anthropic", desc: "Claude Opus 4.7 的扩展思考别名", context: "1M", badge: "thinking" },
   { id: "claude-opus-4-6", label: "Claude Opus 4.6", provider: "anthropic", desc: "Anthropic 当前最强 Opus，适合高难度编码与代理编排", context: "1M", badge: "tools" },
   { id: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 (thinking)", provider: "anthropic", desc: "Claude Opus 4.6 的扩展思考别名", context: "1M", badge: "thinking" },
   { id: "claude-opus-4-5", label: "Claude Opus 4.5", provider: "anthropic", desc: "上一代 Opus 旗舰，适合高质量推理与企业工作流", context: "200K", badge: "tools" },
@@ -138,6 +140,28 @@ const SECTION_META: Record<CapabilitySection, { title: string; groups: GroupKey[
   chat: { title: "文本模型", groups: ["openai", "anthropic", "gemini", "openrouter"] },
   image: { title: "图片模型", groups: ["openai_image", "gemini_image"] },
 };
+
+function formatFallbackLabel(id: string): string {
+  return id
+    .replace(/[-_/]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function buildFallbackEntry(model: ModelStatus): ModelEntry {
+  const badge = model.testMode === "image"
+    ? "image"
+    : model.id.endsWith("-thinking")
+      ? "thinking"
+      : undefined;
+
+  return {
+    id: model.id,
+    label: formatFallbackLabel(model.id),
+    provider: model.provider,
+    desc: "来自服务端注册表的模型",
+    badge,
+  };
+}
 
 function Badge({ variant }: { variant: string }) {
   const styles: Record<string, string> = {
@@ -271,8 +295,23 @@ export function ModelsPage({
     }
   };
 
+  const backendOnlyModels = modelStatus.reduce((acc, model) => {
+    const group = model.group as GroupKey;
+    const meta = GROUP_META[group];
+    if (!meta) return acc;
+    if (meta.models.some((entry) => entry.id === model.id)) return acc;
+    const current = acc[group] ?? [];
+    current.push(buildFallbackEntry(model));
+    acc[group] = current;
+    return acc;
+  }, {} as Partial<Record<GroupKey, ModelEntry[]>>);
+
   const allGroups = (Object.entries(GROUP_META) as Array<[GroupKey, { title: string; provider: Provider; models: ModelEntry[] }]>)
-    .map(([key, value]) => ({ key, ...value }));
+    .map(([key, value]) => ({
+      key,
+      ...value,
+      models: [...value.models, ...(backendOnlyModels[key] ?? [])],
+    }));
 
   const statusMap = new Map(modelStatus.map((m) => [m.id, m.enabled]));
   const totalEnabled = modelStatus.filter((m) => m.enabled).length;
