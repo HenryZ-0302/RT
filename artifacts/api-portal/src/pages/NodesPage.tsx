@@ -27,9 +27,6 @@ type BackendStat = {
   dynamic?: boolean;
   enabled?: boolean;
 };
-
-const DEFAULT_PRICING = { input: 3, output: 15 };
-
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("bg-card text-card-foreground rounded-xl border border-border/50 shadow-sm p-5", className)}>
@@ -319,8 +316,8 @@ export function NodesPage({
                           <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.avgTtftMs ? `${value.avgTtftMs}ms` : "--"}</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">开销</span>
-                          <span className="text-sm font-mono font-medium text-amber-500 dark:text-amber-400">${((value.promptTokens * DEFAULT_PRICING.input + value.completionTokens * DEFAULT_PRICING.output) / 1_000_000).toFixed(2)}</span>
+                          <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">计费</span>
+                          <span className="text-sm font-mono font-medium text-muted-foreground">混合模型不估算</span>
                         </div>
                       </div>
                     )}
@@ -508,8 +505,8 @@ export function NodesPage({
                             <span className="text-sm font-mono font-medium text-foreground text-opacity-80">{value.avgTtftMs ? `${value.avgTtftMs}ms` : "--"}</span>
                           </div>
                           <div className="flex flex-col">
-                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">开销</span>
-                            <span className="text-sm font-mono font-medium text-amber-500 dark:text-amber-400">${((value.promptTokens * DEFAULT_PRICING.input + value.completionTokens * DEFAULT_PRICING.output) / 1_000_000).toFixed(2)}</span>
+                            <span className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wider">计费</span>
+                            <span className="text-sm font-mono font-medium text-muted-foreground">混合模型不估算</span>
                           </div>
                         </div>
                       )}

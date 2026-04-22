@@ -123,6 +123,50 @@ function buildReasoningFields(reasoning: string): { reasoning: string; reasoning
   };
 }
 
+function estimateTokensFromValue(value: unknown): number {
+  const visited = new Set<unknown>();
+
+  const walk = (current: unknown): number => {
+    if (current === null || current === undefined) return 0;
+    if (typeof current === "string") return current.length;
+    if (typeof current === "number" || typeof current === "boolean") return String(current).length;
+    if (typeof current !== "object") return 0;
+    if (visited.has(current)) return 0;
+    visited.add(current);
+
+    if (Array.isArray(current)) return current.reduce((sum, item) => sum + walk(item), 0);
+
+    return Object.values(current as Record<string, unknown>).reduce((sum, item) => sum + walk(item), 0);
+  };
+
+  return Math.max(1, Math.ceil(walk(value) / 4));
+}
+
+function estimateTokensFromChars(chars: number): number {
+  return chars > 0 ? Math.ceil(chars / 4) : 0;
+}
+
+function sumGeminiBillableOutputTokens(usage: {
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+} | undefined): number | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+
+  let total = 0;
+  let hasValue = false;
+
+  if (typeof usage.candidatesTokenCount === "number") {
+    total += usage.candidatesTokenCount;
+    hasValue = true;
+  }
+  if (typeof usage.thoughtsTokenCount === "number") {
+    total += usage.thoughtsTokenCount;
+    hasValue = true;
+  }
+
+  return hasValue ? total : undefined;
+}
+
 function extractGeminiTextAndReasoning(source: unknown): { text: string; reasoning: string } {
   const candidates = (source as { candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }> })?.candidates;
   const parts = candidates?.[0]?.content?.parts ?? [];
@@ -462,6 +506,7 @@ async function handleGemini({
       let ttftMs: number | undefined;
       let promptTokens = 0;
       let completionTokens = 0;
+      let outputChars = 0;
       const chatId = `chatcmpl-${Date.now()}`;
 
       const response = await client.models.generateContentStream({
@@ -479,9 +524,10 @@ async function handleGemini({
           ttftMs = Date.now() - startTime;
         }
         if (chunk.usageMetadata) {
-          promptTokens = chunk.usageMetadata.promptTokenCount ?? 0;
-          completionTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
+          promptTokens = chunk.usageMetadata.promptTokenCount ?? promptTokens;
+          completionTokens = sumGeminiBillableOutputTokens(chunk.usageMetadata) ?? completionTokens;
         }
+        outputChars += text.length + reasoning.length;
         if (reasoning) {
           const reasoningChunk = {
             id: chatId,
@@ -514,6 +560,8 @@ async function handleGemini({
 
       writeAndFlush(res, "data: [DONE]\n\n");
       res.end();
+      if (promptTokens === 0) promptTokens = estimateTokensFromValue({ contents, systemInstruction });
+      if (completionTokens === 0) completionTokens = estimateTokensFromChars(outputChars);
       return { promptTokens, completionTokens, ttftMs };
     } catch (streamErr) {
       if (res.headersSent || !getRoutingSettings().fakeStream) throw streamErr;
@@ -523,8 +571,8 @@ async function handleGemini({
         config: { ...config, ...(systemInstruction ? { systemInstruction } : {}) },
       });
       const { text, reasoning } = extractGeminiTextAndReasoning(response);
-      const pTokens = response.usageMetadata?.promptTokenCount ?? 0;
-      const cTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      const pTokens = response.usageMetadata?.promptTokenCount ?? estimateTokensFromValue({ contents, systemInstruction });
+      const cTokens = sumGeminiBillableOutputTokens(response.usageMetadata) ?? estimateTokensFromChars(text.length + reasoning.length);
       const json = {
         id: `chatcmpl-${Date.now()}`, object: "chat.completion",
         created: Math.floor(Date.now() / 1000), model,
@@ -552,8 +600,8 @@ async function handleGemini({
     });
 
     const { text, reasoning } = extractGeminiTextAndReasoning(response);
-    const promptTokens = response.usageMetadata?.promptTokenCount ?? 0;
-    const completionTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+    const promptTokens = response.usageMetadata?.promptTokenCount ?? estimateTokensFromValue({ contents, systemInstruction });
+    const completionTokens = sumGeminiBillableOutputTokens(response.usageMetadata) ?? estimateTokensFromChars(text.length + reasoning.length);
 
     res.json({
       id: `chatcmpl-${Date.now()}`,

@@ -2,6 +2,89 @@ import { type Response } from "express";
 import { type Backend } from "./backendPool";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "./routeSupport";
 
+function estimateTokensFromChars(chars: number): number {
+  return chars > 0 ? Math.ceil(chars / 4) : 0;
+}
+
+function extractUsageCounts(payload: Record<string, unknown>): {
+  promptTokens?: number;
+  completionTokens?: number;
+} {
+  let promptTokens: number | undefined;
+  let completionTokens: number | undefined;
+
+  const usage = payload["usage"] as { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number } | undefined;
+  if (usage && typeof usage === "object") {
+    if (typeof usage.prompt_tokens === "number") promptTokens = usage.prompt_tokens;
+    if (typeof usage.completion_tokens === "number") completionTokens = usage.completion_tokens;
+    if (promptTokens === undefined && typeof usage.input_tokens === "number") promptTokens = usage.input_tokens;
+    if (completionTokens === undefined && typeof usage.output_tokens === "number") completionTokens = usage.output_tokens;
+  }
+
+  const usageMetadata = payload["usageMetadata"] as {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+  } | undefined;
+  if (usageMetadata && typeof usageMetadata === "object") {
+    if (promptTokens === undefined && typeof usageMetadata.promptTokenCount === "number") {
+      promptTokens = usageMetadata.promptTokenCount;
+    }
+    if (completionTokens === undefined) {
+      let billableOutputTokens = 0;
+      let hasBillableOutput = false;
+
+      if (typeof usageMetadata.candidatesTokenCount === "number") {
+        billableOutputTokens += usageMetadata.candidatesTokenCount;
+        hasBillableOutput = true;
+      }
+      if (typeof usageMetadata.thoughtsTokenCount === "number") {
+        billableOutputTokens += usageMetadata.thoughtsTokenCount;
+        hasBillableOutput = true;
+      }
+
+      if (hasBillableOutput) completionTokens = billableOutputTokens;
+    }
+  }
+
+  const message = payload["message"] as { usage?: { input_tokens?: number; output_tokens?: number } } | undefined;
+  if (message?.usage) {
+    if (promptTokens === undefined && typeof message.usage.input_tokens === "number") {
+      promptTokens = message.usage.input_tokens;
+    }
+    if (completionTokens === undefined && typeof message.usage.output_tokens === "number") {
+      completionTokens = message.usage.output_tokens;
+    }
+  }
+
+  return { promptTokens, completionTokens };
+}
+
+function countStreamOutputChars(payload: Record<string, unknown>): number {
+  const deltaContent = (payload["choices"] as Array<{ delta?: { content?: string } }> | undefined)?.[0]?.delta?.content;
+  if (typeof deltaContent === "string" && deltaContent) return deltaContent.length;
+
+  const messageContent = (payload["choices"] as Array<{ message?: { content?: string } }> | undefined)?.[0]?.message?.content;
+  if (typeof messageContent === "string" && messageContent) return messageContent.length;
+
+  const delta = payload["delta"] as { text?: string; thinking?: string } | undefined;
+  if (typeof delta?.text === "string" && delta.text) return delta.text.length;
+  if (typeof delta?.thinking === "string" && delta.thinking) return delta.thinking.length;
+
+  const candidates = payload["candidates"] as Array<{ content?: { parts?: Array<Record<string, unknown>> } }> | undefined;
+  if (!Array.isArray(candidates)) return 0;
+
+  let chars = 0;
+  for (const candidate of candidates) {
+    const parts = candidate.content?.parts ?? [];
+    for (const part of parts) {
+      if (typeof part?.text === "string") chars += part.text.length;
+    }
+  }
+
+  return chars;
+}
+
 export async function handleFriendJsonProxy({
   backend,
   path,
@@ -31,14 +114,16 @@ export async function handleFriendSseProxy({
   path,
   body,
   res,
+  startTime,
   timeoutMs = 180_000,
 }: {
   backend: Extract<Backend, { kind: "friend" }>;
   path: string;
   body: unknown;
   res: Response;
+  startTime?: number;
   timeoutMs?: number;
-}): Promise<void> {
+}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; outputChars: number }> {
   const fetchRes = await fetch(`${backend.url}${path}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${backend.apiKey}`, "Content-Type": "application/json" },
@@ -56,20 +141,61 @@ export async function handleFriendSseProxy({
   setSseHeaders(res);
   const reader = fetchRes.body.getReader();
   const decoder = new TextDecoder();
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let ttftMs: number | undefined;
+  let outputChars = 0;
+  let parseBuffer = "";
 
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      if (value) writeAndFlush(res, decoder.decode(value, { stream: true }));
+      if (!value) continue;
+
+      const text = decoder.decode(value, { stream: true });
+      writeAndFlush(res, text);
+      parseBuffer += text;
+
+      const lines = parseBuffer.split("\n");
+      parseBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trimEnd();
+        if (!trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+
+        try {
+          const payload = JSON.parse(data) as Record<string, unknown>;
+          const usage = extractUsageCounts(payload);
+          if (typeof usage.promptTokens === "number") promptTokens = usage.promptTokens;
+          if (typeof usage.completionTokens === "number") completionTokens = usage.completionTokens;
+
+          const chunkChars = countStreamOutputChars(payload);
+          outputChars += chunkChars;
+          if (ttftMs === undefined && startTime !== undefined && chunkChars > 0) {
+            ttftMs = Date.now() - startTime;
+          }
+        } catch {}
+      }
     }
     const tail = decoder.decode();
-    if (tail) writeAndFlush(res, tail);
+    if (tail) {
+      writeAndFlush(res, tail);
+      parseBuffer += tail;
+    }
   } finally {
     reader.releaseLock();
   }
 
   res.end();
+  return {
+    promptTokens,
+    completionTokens: completionTokens || estimateTokensFromChars(outputChars),
+    ttftMs,
+    outputChars,
+  };
 }
 
 export async function handleFriendChatProxy(args: {
@@ -124,8 +250,10 @@ export async function handleFriendChatProxy(args: {
     }
     const json = await fetchRes.json() as Record<string, unknown>;
     res.json(json);
-    const usage = json["usage"] as { prompt_tokens?: number; completion_tokens?: number } | null | undefined;
-    if ((usage?.prompt_tokens ?? 0) === 0) {
+    const usage = extractUsageCounts(json);
+    let promptTokens = usage.promptTokens ?? 0;
+    let completionTokens = usage.completionTokens ?? 0;
+    if (promptTokens === 0 || completionTokens === 0) {
       const inputChars = messages.reduce((acc, message) => {
         if (typeof message.content === "string") return acc + message.content.length;
         if (Array.isArray(message.content)) {
@@ -135,10 +263,11 @@ export async function handleFriendChatProxy(args: {
         }
         return acc;
       }, 0);
-      const outputChars = (json["choices"] as Array<{ message?: { content?: string } }>)?.[0]?.message?.content?.length ?? 0;
-      return { promptTokens: Math.ceil(inputChars / 4), completionTokens: Math.ceil(outputChars / 4) };
+      const outputChars = countStreamOutputChars(json);
+      if (promptTokens === 0) promptTokens = estimateTokensFromChars(inputChars);
+      if (completionTokens === 0) completionTokens = estimateTokensFromChars(outputChars);
     }
-    return { promptTokens: usage?.prompt_tokens ?? 0, completionTokens: usage?.completion_tokens ?? 0 };
+    return { promptTokens, completionTokens };
   }
 
   const fetchRes = await fetch(`${backend.url}/v1/chat/completions`, {
@@ -158,7 +287,9 @@ export async function handleFriendChatProxy(args: {
     req.log.info("Friend returned JSON for stream request — fake-streaming");
     const json = await fetchRes.json() as Record<string, unknown>;
     const result = await fakeStreamResponse(res, json, startTime);
-    if (result.promptTokens === 0) {
+    let promptTokens = result.promptTokens;
+    let completionTokens = result.completionTokens;
+    if (promptTokens === 0 || completionTokens === 0) {
       const inputChars = messages.reduce((acc, message) => {
         if (typeof message.content === "string") return acc + message.content.length;
         if (Array.isArray(message.content)) {
@@ -169,9 +300,10 @@ export async function handleFriendChatProxy(args: {
         return acc;
       }, 0);
       const outputContent = ((json["choices"] as Array<{ message?: { content?: string } }>)?.[0]?.message?.content ?? "").length;
-      return { promptTokens: Math.ceil(inputChars / 4), completionTokens: Math.ceil(outputContent / 4), ttftMs: result.ttftMs };
+      if (promptTokens === 0) promptTokens = Math.ceil(inputChars / 4);
+      if (completionTokens === 0) completionTokens = Math.ceil(outputContent / 4);
     }
-    return result;
+    return { promptTokens, completionTokens, ttftMs: result.ttftMs };
   }
 
   setSseHeaders(res);
@@ -228,7 +360,7 @@ export async function handleFriendChatProxy(args: {
 
   res.end();
 
-  if (promptTokens === 0) {
+  if (promptTokens === 0 || completionTokens === 0) {
     const inputChars = messages.reduce((acc, message) => {
       if (typeof message.content === "string") return acc + message.content.length;
       if (Array.isArray(message.content)) {
@@ -238,8 +370,8 @@ export async function handleFriendChatProxy(args: {
       }
       return acc;
     }, 0);
-    promptTokens = Math.ceil(inputChars / 4);
-    completionTokens = Math.ceil(outputChars / 4);
+    if (promptTokens === 0) promptTokens = Math.ceil(inputChars / 4);
+    if (completionTokens === 0) completionTokens = Math.ceil(outputChars / 4);
   }
 
   return { promptTokens, completionTokens, ttftMs };

@@ -14,14 +14,94 @@ import { cn } from "../lib/utils";
 type BackendStat = { calls: number; errors: number; streamingCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; avgDurationMs: number; avgTtftMs: number | null; health: string; url?: string; dynamic?: boolean; enabled?: boolean };
 type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
 
-const DEFAULT_PRICING = { input: 3, output: 15 };
+type ModelPricing = {
+  input: number;
+  output: number;
+  longContextInput?: number;
+  longContextOutput?: number;
+  longContextThreshold?: number;
+};
 
-function estimateCostFallback(prompt: number, completion: number): number {
-  return (prompt * DEFAULT_PRICING.input + completion * DEFAULT_PRICING.output) / 1_000_000;
+type ModelCostBreakdown = {
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+};
+
+const MODEL_PRICING: Record<string, ModelPricing> = {
+  "gpt-5.2": { input: 1.75, output: 14 },
+  "gpt-5.1": { input: 1.25, output: 10 },
+  "gpt-5": { input: 1.25, output: 10 },
+  "gpt-5-mini": { input: 0.25, output: 2 },
+  "gpt-5-nano": { input: 0.05, output: 0.4 },
+  "gpt-4.1": { input: 2, output: 8 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6 },
+  "gpt-4.1-nano": { input: 0.1, output: 0.4 },
+  "gpt-4o": { input: 2.5, output: 10 },
+  "gpt-4o-mini": { input: 0.15, output: 0.6 },
+  "o4-mini": { input: 1.1, output: 4.4 },
+  "o3": { input: 2, output: 8 },
+  "o3-mini": { input: 1.1, output: 4.4 },
+  "claude-opus-4-1": { input: 15, output: 75 },
+  "claude-opus-4-5": { input: 5, output: 25 },
+  "claude-opus-4-6": { input: 5, output: 25 },
+  "claude-opus-4-7": { input: 5, output: 25 },
+  "claude-sonnet-4-5": { input: 3, output: 15 },
+  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-haiku-4-5": { input: 1, output: 5 },
+  "gemini-3-pro-preview": { input: 2, output: 12, longContextInput: 4, longContextOutput: 18, longContextThreshold: 200_000 },
+  "gemini-3.1-pro-preview": { input: 2, output: 12, longContextInput: 4, longContextOutput: 18, longContextThreshold: 200_000 },
+  "gemini-3-flash-preview": { input: 0.5, output: 3 },
+  "gemini-2.5-pro": { input: 1.25, output: 10, longContextInput: 2.5, longContextOutput: 15, longContextThreshold: 200_000 },
+  "gemini-2.5-flash": { input: 0.3, output: 2.5 },
+};
+
+function normalizeModelForPricing(model: string): string {
+  return model.toLowerCase().replace(/-thinking$/, "");
+}
+
+function getModelPricing(model: string): ModelPricing | null {
+  const normalized = normalizeModelForPricing(model);
+  return MODEL_PRICING[normalized] ?? null;
+}
+
+function estimateModelCost(model: string, prompt: number, completion: number): ModelCostBreakdown | null {
+  const pricing = getModelPricing(model);
+  if (!pricing) return null;
+
+  const useLongContext = typeof pricing.longContextThreshold === "number" && prompt > pricing.longContextThreshold;
+  const inputRate = useLongContext ? (pricing.longContextInput ?? pricing.input) : pricing.input;
+  const outputRate = useLongContext ? (pricing.longContextOutput ?? pricing.output) : pricing.output;
+  const inputCost = (prompt * inputRate) / 1_000_000;
+  const outputCost = (completion * outputRate) / 1_000_000;
+
+  return {
+    inputCost,
+    outputCost,
+    totalCost: inputCost + outputCost,
+  };
+}
+
+function formatUsd(value: number | null): string {
+  if (value === null) return "--";
+  if (value === 0) return "$0";
+  if (value >= 1) return `$${value.toFixed(2)}`;
+  if (value >= 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(6)}`;
 }
 
 function inferProvider(model: string): string {
   const normalized = model.toLowerCase();
+  if (normalized.startsWith("x-ai/")) return "xAI";
+  if (normalized.startsWith("meta-llama/")) return "Meta";
+  if (normalized.startsWith("mistralai/")) return "Mistral";
+  if (normalized.startsWith("google/")) return "Google";
+  if (normalized.startsWith("anthropic/")) return "Anthropic";
+  if (normalized.startsWith("deepseek/")) return "DeepSeek";
+  if (normalized.startsWith("qwen/")) return "Qwen";
+  if (normalized.startsWith("cohere/")) return "Cohere";
+  if (normalized.startsWith("amazon/")) return "Amazon";
+  if (normalized.startsWith("baidu/")) return "Baidu";
   if (normalized.startsWith("gpt") || normalized.startsWith("o1") || normalized.startsWith("o3") || normalized.startsWith("o4")) return "OpenAI";
   if (normalized.startsWith("claude")) return "Anthropic";
   if (normalized.startsWith("gemini")) return "Google";
@@ -90,16 +170,18 @@ export function StatsPage({
     : [];
 
   const totalModelCost = modelStats
-    ? chatModelEntries.reduce((sum, [, ms]) => sum + estimateCostFallback(ms.promptTokens, ms.completionTokens), 0)
+    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (estimateModelCost(model, ms.promptTokens, ms.completionTokens)?.totalCost ?? 0), 0)
     : null;
 
   const totalModelInputCost = modelStats
-    ? chatModelEntries.reduce((sum, [, ms]) => sum + (ms.promptTokens * DEFAULT_PRICING.input) / 1_000_000, 0)
+    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (estimateModelCost(model, ms.promptTokens, ms.completionTokens)?.inputCost ?? 0), 0)
     : null;
 
   const totalModelOutputCost = modelStats
-    ? chatModelEntries.reduce((sum, [, ms]) => sum + (ms.completionTokens * DEFAULT_PRICING.output) / 1_000_000, 0)
+    ? chatModelEntries.reduce((sum, [model, ms]) => sum + (estimateModelCost(model, ms.promptTokens, ms.completionTokens)?.outputCost ?? 0), 0)
     : null;
+
+  const unpricedChatModelCount = chatModelEntries.filter(([model, ms]) => ms.calls > 0 && !getModelPricing(model)).length;
 
   const hasModelStats = chatModelEntries.some(([, ms]) => ms.calls > 0) || imageModelEntries.some(([, ms]) => ms.calls > 0);
 
@@ -118,7 +200,7 @@ export function StatsPage({
           promptTokens: ms.promptTokens,
           completionTokens: ms.completionTokens,
           totalTokens: ms.promptTokens + ms.completionTokens,
-          cost: capability === "image" ? null : estimateCostFallback(ms.promptTokens, ms.completionTokens),
+          cost: capability === "image" ? null : estimateModelCost(model, ms.promptTokens, ms.completionTokens),
         };
       });
 
@@ -294,18 +376,22 @@ export function StatsPage({
 
             <Card className="flex flex-col border-amber-500/10 shadow-sm border-t-2 border-t-amber-500 lg:col-span-1">
             <div className="flex items-center gap-2 text-amber-500 mb-4 font-semibold text-sm">
-              <DollarSign size={16} /> 预估开销
+              <DollarSign size={16} /> 计费参考
             </div>
             <div className="flex flex-col gap-4 justify-between h-full">
               <div>
                 <div className="text-3xl font-bold font-mono tracking-tight text-amber-500">
-                  ${(totalModelCost !== null ? totalModelCost : estimateCostFallback(totals!.promptTokens, totals!.completionTokens)).toFixed(2)}
+                  {formatUsd(totalModelCost)}
                 </div>
               </div>
               <div className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded-md border border-border/50">
-                <div className="flex justify-between mb-1"><span>文本输入:</span> <span>${(totalModelInputCost ?? (totals!.promptTokens * DEFAULT_PRICING.input / 1_000_000)).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>文本输出:</span> <span>${(totalModelOutputCost ?? (totals!.completionTokens * DEFAULT_PRICING.output / 1_000_000)).toFixed(2)}</span></div>
+                <div className="flex justify-between mb-1"><span>文本输入:</span> <span>{formatUsd(totalModelInputCost)}</span></div>
+                <div className="flex justify-between"><span>文本输出:</span> <span>{formatUsd(totalModelOutputCost)}</span></div>
                 <div className="flex justify-between mt-1"><span>图片请求:</span> <span>{imageModelEntries.reduce((sum, [, ms]) => sum + ms.calls, 0)}</span></div>
+                <div className="flex justify-between mt-1"><span>未计价文本模型:</span> <span>{unpricedChatModelCount}</span></div>
+                <div className="mt-2 text-[11px] leading-relaxed">
+                  Token 统计优先使用 provider 返回的 usage；Gemini thinking token 按计费口径并入输出。缺失时才按字符估算。计费仅按已知官方文本模型单价估算，未计入 cached input、web search、tool 等附加费用；OpenRouter 与未映射模型不强行套统一价格。
+                </div>
               </div>
             </div>
           </Card>
@@ -323,7 +409,8 @@ export function StatsPage({
               <div className="space-y-3">
                 {groupedModelEntries.map((group) => {
                   const totalCalls = group.items.reduce((sum, item) => sum + item.calls, 0);
-                  const totalCost = group.items.reduce((sum, item) => sum + (item.cost ?? 0), 0);
+                  const totalCost = group.items.reduce((sum, item) => sum + (item.cost?.totalCost ?? 0), 0);
+                  const pricedItems = group.items.filter((item) => item.cost !== null).length;
                   const isOpen = !!expandedProviders[group.provider];
 
                   return (
@@ -342,7 +429,7 @@ export function StatsPage({
                         </div>
                         <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
                           <span>{totalCalls} 次调用</span>
-                          <span>${totalCost.toFixed(4)}</span>
+                          <span>{pricedItems > 0 ? formatUsd(totalCost) : "未计价"}</span>
                         </div>
                       </button>
 
@@ -380,7 +467,9 @@ export function StatsPage({
                                 </div>
                                 <div>
                                   <div className="text-muted-foreground mb-1">预估开销</div>
-                                  <div className="font-semibold text-foreground">{item.cost === null ? "不计 token 开销" : `$${item.cost.toFixed(4)}`}</div>
+                                  <div className="font-semibold text-foreground">
+                                    {item.cost === null ? "官方价格缺失" : formatUsd(item.cost.totalCost)}
+                                  </div>
                                 </div>
                               </div>
                             </div>

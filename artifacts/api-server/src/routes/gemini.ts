@@ -81,7 +81,7 @@ export function createGeminiRouter(deps: {
     };
   }
 
-  function estimateGeminiNativeTokensFromContents(contents: unknown): number {
+  function estimateGeminiNativeTokensFromValue(value: unknown): number {
     const visited = new Set<unknown>();
 
     const walk = (value: unknown): number => {
@@ -97,7 +97,69 @@ export function createGeminiRouter(deps: {
       return Object.values(value as Record<string, unknown>).reduce((sum, item) => sum + walk(item), 0);
     };
 
-    return Math.max(1, Math.ceil(walk(contents) / 4));
+    return Math.max(1, Math.ceil(walk(value) / 4));
+  }
+
+  function estimateGeminiNativePromptTokens(body: GeminiNativeGenerateContentRequest): number {
+    return estimateGeminiNativeTokensFromValue({
+      contents: body.contents,
+      systemInstruction: body.systemInstruction,
+    });
+  }
+
+  function estimateTokensFromChars(chars: number): number {
+    return chars > 0 ? Math.ceil(chars / 4) : 0;
+  }
+
+  function sumGeminiBillableOutputTokens(usage: {
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+  } | undefined): number | undefined {
+    if (!usage || typeof usage !== "object") return undefined;
+
+    let total = 0;
+    let hasValue = false;
+
+    if (typeof usage.candidatesTokenCount === "number") {
+      total += usage.candidatesTokenCount;
+      hasValue = true;
+    }
+    if (typeof usage.thoughtsTokenCount === "number") {
+      total += usage.thoughtsTokenCount;
+      hasValue = true;
+    }
+
+    return hasValue ? total : undefined;
+  }
+
+  function extractGeminiNativeUsage(payload: Record<string, unknown>): {
+    promptTokens?: number;
+    completionTokens?: number;
+  } {
+    const usage = payload["usageMetadata"] as {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      thoughtsTokenCount?: number;
+    } | undefined;
+    return {
+      promptTokens: usage?.promptTokenCount,
+      completionTokens: sumGeminiBillableOutputTokens(usage),
+    };
+  }
+
+  function countGeminiNativeOutputChars(payload: Record<string, unknown>): number {
+    const candidates = payload["candidates"] as Array<{ content?: { parts?: Array<Record<string, unknown>> } }> | undefined;
+    if (!Array.isArray(candidates)) return 0;
+
+    let chars = 0;
+    for (const candidate of candidates) {
+      const parts = candidate.content?.parts ?? [];
+      for (const part of parts) {
+        if (typeof part?.text === "string") chars += part.text.length;
+      }
+    }
+
+    return chars;
   }
 
   async function handleGeminiNativeGenerateContent(req: Request, res: Response) {
@@ -129,12 +191,14 @@ export function createGeminiRouter(deps: {
 
         const duration = Date.now() - startTime;
         if (backend.kind === "friend") deps.setHealth(backend.url, true);
-        const usage = responseJson["usageMetadata"] as { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+        const usage = extractGeminiNativeUsage(responseJson);
+        const promptTokens = usage.promptTokens ?? estimateGeminiNativePromptTokens(body);
+        const completionTokens = usage.completionTokens ?? estimateTokensFromChars(countGeminiNativeOutputChars(responseJson));
         deps.recordCallStat(
           backendLabel,
           duration,
-          usage?.promptTokenCount ?? estimateGeminiNativeTokensFromContents(body.contents),
-          usage?.candidatesTokenCount ?? 0,
+          promptTokens,
+          completionTokens,
           undefined,
           selectedModel,
         );
@@ -147,8 +211,8 @@ export function createGeminiRouter(deps: {
           status: 200,
           duration,
           stream: false,
-          promptTokens: usage?.promptTokenCount,
-          completionTokens: usage?.candidatesTokenCount,
+          promptTokens,
+          completionTokens,
           level: "info",
         });
         res.json(responseJson);
@@ -200,14 +264,24 @@ export function createGeminiRouter(deps: {
     for (let attempt = 0; ; attempt++) {
       const backendLabel = backend.kind === "local" ? "local" : backend.label;
       try {
+        let promptTokens = 0;
+        let completionTokens = 0;
+        let ttftMs: number | undefined;
+        let outputChars = 0;
+
         if (backend.kind === "friend") {
           triedFriendUrls.add(backend.url);
-          await handleFriendSseProxy({
+          const streamStats = await handleFriendSseProxy({
             backend,
             path: `/v1beta/models/${selectedModel}:streamGenerateContent`,
             body,
             res,
+            startTime,
           });
+          promptTokens = streamStats.promptTokens;
+          completionTokens = streamStats.completionTokens;
+          ttftMs = streamStats.ttftMs;
+          outputChars = streamStats.outputChars;
         } else {
           const client = deps.makeLocalGemini();
           const streamResponse = await (client.models as unknown as {
@@ -215,6 +289,16 @@ export function createGeminiRouter(deps: {
           }).generateContentStream(buildGeminiNativeGenerateArgs(selectedModel, body));
           setSseHeaders(res);
           for await (const chunk of streamResponse) {
+            const usage = extractGeminiNativeUsage(chunk);
+            if (typeof usage.promptTokens === "number") promptTokens = usage.promptTokens;
+            if (typeof usage.completionTokens === "number") completionTokens = usage.completionTokens;
+
+            const chunkChars = countGeminiNativeOutputChars(chunk);
+            outputChars += chunkChars;
+            if (ttftMs === undefined && chunkChars > 0) {
+              ttftMs = Date.now() - startTime;
+            }
+
             writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
           }
           res.end();
@@ -222,12 +306,14 @@ export function createGeminiRouter(deps: {
 
         const duration = Date.now() - startTime;
         if (backend.kind === "friend") deps.setHealth(backend.url, true);
+        if (promptTokens === 0) promptTokens = estimateGeminiNativePromptTokens(body);
+        if (completionTokens === 0) completionTokens = estimateTokensFromChars(outputChars);
         deps.recordCallStat(
           backendLabel,
           duration,
-          estimateGeminiNativeTokensFromContents(body.contents),
-          0,
-          undefined,
+          promptTokens,
+          completionTokens,
+          ttftMs,
           selectedModel,
         );
         deps.pushRequestLog({
@@ -239,6 +325,8 @@ export function createGeminiRouter(deps: {
           status: 200,
           duration,
           stream: true,
+          promptTokens,
+          completionTokens,
           level: "info",
         });
         return;
@@ -307,7 +395,7 @@ export function createGeminiRouter(deps: {
               contents: body.contents ?? [],
             });
           } else {
-            responseJson = { totalTokens: estimateGeminiNativeTokensFromContents(body.contents) };
+            responseJson = { totalTokens: estimateGeminiNativePromptTokens(body) };
           }
         }
 

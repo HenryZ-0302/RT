@@ -106,6 +106,7 @@ function createFriendBackendServer() {
         usageMetadata: {
           promptTokenCount: 6,
           candidatesTokenCount: 2,
+          thoughtsTokenCount: 3,
         },
       }));
       return;
@@ -262,4 +263,7 @@ test("api server smoke suite", async () => {
   assert.ok(metrics.stats);
   assert.ok(metrics.stats.FRIEND);
   assert.ok(metrics.stats.FRIEND.calls >= 3);
+  assert.ok(metrics.modelStats);
+  assert.equal(metrics.modelStats["gemini-2.5-pro"]?.promptTokens, 6);
+  assert.equal(metrics.modelStats["gemini-2.5-pro"]?.completionTokens, 5);
 });
