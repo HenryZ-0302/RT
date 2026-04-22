@@ -5,6 +5,13 @@ export interface PortalVersionInfo {
   name?: string;
   releaseDate?: string;
   releaseNotes?: string;
+  hasUpdate?: boolean;
+  latestVersion?: string;
+  latestReleaseDate?: string;
+  latestReleaseNotes?: string;
+  checkError?: string;
+  source?: string;
+  upstreamRepoUrl?: string;
 }
 
 export const FALLBACK_VERSION_INFO: PortalVersionInfo = {
@@ -23,11 +30,18 @@ export function mergePortalVersionInfo(
     name: data?.name ?? FALLBACK_VERSION_INFO.name,
     releaseDate: data?.releaseDate ?? FALLBACK_VERSION_INFO.releaseDate,
     releaseNotes: data?.releaseNotes ?? FALLBACK_VERSION_INFO.releaseNotes,
+    hasUpdate: data?.hasUpdate,
+    latestVersion: data?.latestVersion,
+    latestReleaseDate: data?.latestReleaseDate,
+    latestReleaseNotes: data?.latestReleaseNotes,
+    checkError: data?.checkError,
+    source: data?.source,
+    upstreamRepoUrl: data?.upstreamRepoUrl,
   };
 }
 
 export async function fetchPortalVersionInfo(baseUrl: string): Promise<PortalVersionInfo> {
-  const response = await fetch(servicePaths.release(baseUrl));
+  const response = await fetch(servicePaths.release(baseUrl), { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Failed to load version info: HTTP ${response.status}`);
   }

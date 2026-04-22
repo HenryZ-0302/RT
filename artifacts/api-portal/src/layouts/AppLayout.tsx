@@ -112,7 +112,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
       </div>
       {/* Sidebar (Desktop) */}
       <aside className={cn(
-        "hidden md:flex flex-col border-r transition-[width,background-color,border-color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] relative z-20 shadow-[18px_0_60px_-46px_rgba(15,23,42,0.85)] backdrop-blur-2xl",
+        "hidden md:flex flex-col border-r overflow-hidden transition-[width,background-color,border-color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] relative z-20 shadow-[18px_0_60px_-46px_rgba(15,23,42,0.85)] backdrop-blur-2xl",
         "bg-white/50 dark:bg-slate-950/45 border-white/40 dark:border-white/8",
         collapsed ? "w-[80px]" : "w-[240px]"
       )}>
@@ -136,7 +136,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
           </div>
         </div>
 
-        <div className="flex-1 py-6 flex flex-col gap-1.5 px-3 overflow-y-auto">
+        <div className="flex-1 py-6 flex flex-col gap-1.5 px-3 overflow-x-hidden overflow-y-auto">
           <div
             className={cn(
               "px-3 overflow-hidden transition-[max-height,opacity,transform,padding] duration-400 ease-[cubic-bezier(0.22,1,0.36,1)]",
@@ -156,6 +156,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
               <Link
                 key={item.href}
                 href={item.href}
+                title={collapsed ? item.label : undefined}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-2xl transition-all duration-200 relative group cursor-pointer border",
                   isActive 
@@ -176,11 +177,6 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
                 >
                   {item.label}
                 </span>
-                {collapsed && (
-                  <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-popover/95 text-popover-foreground text-xs font-medium rounded-xl shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 border border-border/60 scale-95 group-hover:scale-100 transition-all origin-left backdrop-blur-md">
-                    {item.label}
-                  </div>
-                )}
               </Link>
             )
           })}

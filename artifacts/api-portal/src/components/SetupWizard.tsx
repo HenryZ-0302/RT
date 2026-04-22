@@ -189,6 +189,14 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
                 <div className="text-xs text-muted-foreground">{summaryText}</div>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void checkSetupStatus()}
+                  disabled={checking}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+                >
+                  {checking ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
+                  重新检测
+                </button>
                 {!checking && status && (
                   <span
                     className={cn(
@@ -213,17 +221,6 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
 
             {detailsOpen && (
               <div className="mt-4 space-y-3">
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => void checkSetupStatus()}
-                    disabled={checking}
-                    className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary disabled:opacity-50"
-                  >
-                    {checking ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
-                    重新检测
-                  </button>
-                </div>
-
                 {checking || !status ? (
                   <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-3 text-sm text-muted-foreground">
                     <Loader2 size={14} className="animate-spin" />

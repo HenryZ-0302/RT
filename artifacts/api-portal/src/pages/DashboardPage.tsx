@@ -1,9 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Activity, ArrowUpRight, Loader2, RefreshCw } from "lucide-react";
 import { cn } from "../lib/utils";
 import { servicePaths } from "../lib/service";
 import { FALLBACK_VERSION_INFO, fetchPortalVersionInfo, type PortalVersionInfo } from "../lib/version";
 
 type OnlineStatus = "checking" | "online" | "offline";
+type HealthcheckPayload = {
+  timestamp?: string;
+  apiServer?: {
+    status?: string;
+    uptimeSeconds?: number;
+    version?: string;
+  };
+};
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -21,6 +30,26 @@ function getGreeting(hour: number): { title: string; subtitle: string } {
   return { title: "晚上好", subtitle: "欢迎回来，今天辛苦了，收尾工作做好哦。" };
 }
 
+function formatDuration(totalSeconds: number | null): string {
+  if (totalSeconds === null || totalSeconds < 0) return "--";
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
+  return `${minutes} 分钟`;
+}
+
+function formatCheckTime(value: string | null): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 export function DashboardPage({
   baseUrl,
   displayUrl,
@@ -30,6 +59,9 @@ export function DashboardPage({
 }) {
   const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
   const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>("checking");
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [uptimeSeconds, setUptimeSeconds] = useState<number | null>(null);
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -37,22 +69,21 @@ export function DashboardPage({
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadVersionInfo() {
-      try {
-        const data = await fetchPortalVersionInfo(displayUrl);
-        if (cancelled) return;
-        setVersionInfo(data);
-      } catch {
-        // Keep fallback version info.
-      }
+  const loadVersionInfo = useCallback(async () => {
+    setUpdateChecking(true);
+    try {
+      const data = await fetchPortalVersionInfo(displayUrl);
+      setVersionInfo(data);
+    } catch {
+      // Keep fallback version info.
+    } finally {
+      setUpdateChecking(false);
     }
-
-    void loadVersionInfo();
-    return () => { cancelled = true; };
   }, [displayUrl]);
+
+  useEffect(() => {
+    void loadVersionInfo();
+  }, [loadVersionInfo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,15 +91,26 @@ export function DashboardPage({
     async function checkOnline() {
       setOnlineStatus("checking");
       try {
-        const response = await fetch(servicePaths.status(baseUrl), {
+        const response = await fetch(servicePaths.healthcheck(baseUrl), {
           cache: "no-store",
           signal: AbortSignal.timeout(5000),
         });
+        if (!response.ok) {
+          if (cancelled) return;
+          setOnlineStatus("offline");
+          setUptimeSeconds(null);
+          return;
+        }
+
+        const payload = await response.json() as HealthcheckPayload;
         if (cancelled) return;
-        setOnlineStatus(response.ok ? "online" : "offline");
+        setOnlineStatus(payload.apiServer?.status === "ok" ? "online" : "offline");
+        setUptimeSeconds(typeof payload.apiServer?.uptimeSeconds === "number" ? payload.apiServer.uptimeSeconds : null);
+        setHealthCheckedAt(payload.timestamp ?? new Date().toISOString());
       } catch {
         if (cancelled) return;
         setOnlineStatus("offline");
+        setUptimeSeconds(null);
       }
     }
 
@@ -83,7 +125,19 @@ export function DashboardPage({
   const greeting = useMemo(() => getGreeting(now.getHours()), [now]);
   const timeText = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
   const dateText = now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
-  const versionDateText = versionInfo.releaseDate.replace(/-/g, "/");
+  const versionDateText = (versionInfo.releaseDate ?? FALLBACK_VERSION_INFO.releaseDate ?? "").replace(/-/g, "/");
+  const latestVersionText = versionInfo.latestVersion
+    ? `v${versionInfo.latestVersion}`
+    : versionInfo.checkError
+      ? "未检测到"
+      : `v${versionInfo.version}`;
+  const versionHintText = versionInfo.hasUpdate
+    ? `发现新版本，当前可更新到 ${latestVersionText}`
+    : versionInfo.checkError
+      ? "更新检测失败，可手动重试"
+      : "当前已是最新版本";
+  const uptimeText = formatDuration(uptimeSeconds);
+  const checkedAtText = formatCheckTime(healthCheckedAt);
 
   const statusPillClassName =
     onlineStatus === "online"
@@ -133,6 +187,76 @@ export function DashboardPage({
           </div>
         </div>
       </Card>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="border-border/50 bg-white/70 dark:bg-slate-950/42">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary/75">
+                <Activity size={14} />
+                服务运行状态
+              </div>
+              <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground">{uptimeText}</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {onlineStatus === "online" ? "API Server 正在稳定运行。" : onlineStatus === "offline" ? "API Server 当前未响应。" : "正在拉取运行状态..."}
+              </p>
+            </div>
+            <span className={cn("text-[11px] px-3 py-1.5 rounded-full border font-medium whitespace-nowrap", statusPillClassName)}>
+              {statusLabel}
+            </span>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-border/50 bg-background/70 p-4">
+              <div className="text-xs text-muted-foreground">最近检查</div>
+              <div className="mt-2 text-lg font-mono font-bold tracking-tight">{checkedAtText}</div>
+            </div>
+            <div className="rounded-xl border border-border/50 bg-background/70 p-4">
+              <div className="text-xs text-muted-foreground">服务地址</div>
+              <div className="mt-2 truncate text-sm font-mono text-foreground">{displayUrl}</div>
+            </div>
+          </div>
+        </Card>
+        <Card className="border-border/50 bg-white/70 dark:bg-slate-950/42">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-primary/75">
+                <RefreshCw size={14} />
+                版本与更新
+              </div>
+              <h2 className="mt-3 text-2xl font-bold tracking-tight text-foreground">v{versionInfo.version}</h2>
+              <p className="mt-2 text-sm text-muted-foreground">{versionHintText}</p>
+            </div>
+            <button
+              onClick={() => void loadVersionInfo()}
+              disabled={updateChecking}
+              className="inline-flex items-center gap-2 rounded-xl border border-border/60 bg-background/80 px-3 py-2 text-xs font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+            >
+              {updateChecking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              检测更新
+            </button>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-border/50 bg-background/70 p-4">
+              <div className="text-xs text-muted-foreground">当前版本日期</div>
+              <div className="mt-2 text-lg font-mono font-bold tracking-tight">{versionDateText}</div>
+            </div>
+            <div className="rounded-xl border border-border/50 bg-background/70 p-4">
+              <div className="text-xs text-muted-foreground">最新版本</div>
+              <div className="mt-2 text-lg font-mono font-bold tracking-tight">{latestVersionText}</div>
+            </div>
+          </div>
+          {versionInfo.upstreamRepoUrl && (
+            <a
+              href={versionInfo.upstreamRepoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary hover:text-primary/80"
+            >
+              打开上游仓库
+              <ArrowUpRight size={14} />
+            </a>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
