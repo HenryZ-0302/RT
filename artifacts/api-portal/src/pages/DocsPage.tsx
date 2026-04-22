@@ -12,8 +12,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { servicePaths } from "../lib/service";
-import { FALLBACK_VERSION_INFO, type PortalVersionInfo } from "../lib/version";
+import { FALLBACK_VERSION_INFO, fetchPortalVersionInfo, type PortalVersionInfo } from "../lib/version";
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
@@ -88,16 +87,9 @@ export function DocsPage({ displayUrl }: { displayUrl: string }) {
 
     async function loadVersionInfo() {
       try {
-        const response = await fetch(servicePaths.release(displayUrl));
-        if (!response.ok) return;
-        const data = await response.json() as PortalVersionInfo;
+        const data = await fetchPortalVersionInfo(displayUrl);
         if (cancelled) return;
-        setVersionInfo({
-          version: data.version ?? FALLBACK_VERSION_INFO.version,
-          name: data.name ?? FALLBACK_VERSION_INFO.name,
-          releaseDate: data.releaseDate ?? FALLBACK_VERSION_INFO.releaseDate,
-          releaseNotes: data.releaseNotes ?? FALLBACK_VERSION_INFO.releaseNotes,
-        });
+        setVersionInfo(data);
       } catch {
         // Keep fallback version info.
       }

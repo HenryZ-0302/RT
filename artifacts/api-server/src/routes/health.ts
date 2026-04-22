@@ -1,8 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { getServiceAccessKey } from "../lib/serviceConfig";
-import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
 import { readJson, writeJson } from "../lib/cloudPersist";
+import { ensureApiKey } from "../middleware/auth";
+import { readLocalVersion } from "../lib/version";
 
 const router: IRouter = Router();
 const HEALTH_HISTORY_FILE = "health_history.json";
@@ -27,23 +27,6 @@ function sendHealth(_req: Request, res: Response) {
   res.json({ status: "ok" });
 }
 
-function readVersion(): string {
-  const candidates = [
-    resolve(process.cwd(), "version.json"),
-    resolve(process.cwd(), "../../version.json"),
-  ];
-
-  for (const file of candidates) {
-    try {
-      if (existsSync(file)) {
-        return (JSON.parse(readFileSync(file, "utf8")) as { version?: string }).version ?? "unknown";
-      }
-    } catch {}
-  }
-
-  return "unknown";
-}
-
 function sendHealthcheck(_req: Request, res: Response) {
   res.json({
     status: "ok",
@@ -51,7 +34,7 @@ function sendHealthcheck(_req: Request, res: Response) {
     apiServer: {
       status: "ok",
       uptimeSeconds: Math.round(process.uptime()),
-      version: readVersion(),
+      version: readLocalVersion(),
     },
     portal: {
       status: "client_check_required",
@@ -76,25 +59,7 @@ function sendBootstrap(_req: Request, res: Response) {
 }
 
 function checkApiKey(req: Request, res: Response): boolean {
-  const serviceKey = getServiceAccessKey();
-  if (!serviceKey) {
-    res.status(500).json({ error: { message: "Service access key is not configured", type: "server_error" } });
-    return false;
-  }
-
-  const authHeader = req.headers.authorization;
-  const xApiKey = req.headers["x-api-key"];
-  let provided: string | undefined;
-
-  if (authHeader?.startsWith("Bearer ")) provided = authHeader.slice(7);
-  else if (typeof xApiKey === "string") provided = xApiKey;
-
-  if (!provided || provided !== serviceKey) {
-    res.status(401).json({ error: { message: "Unauthorized", type: "invalid_request_error" } });
-    return false;
-  }
-
-  return true;
+  return ensureApiKey(req, res);
 }
 
 function getHourKey(date: Date): string {

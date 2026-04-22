@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { readJson, writeJson } from "../lib/cloudPersist";
-import { getServiceAccessKey } from "../lib/serviceConfig";
+import { ensureApiKey } from "../middleware/auth";
 
 const router: IRouter = Router();
 
@@ -35,25 +35,7 @@ export function getSillyTavernMode(): boolean {
 }
 
 function checkApiKey(req: Request, res: Response): boolean {
-  const serviceKey = getServiceAccessKey();
-  if (!serviceKey) {
-    res.status(500).json({ error: { message: "Service access key is not configured", type: "server_error" } });
-    return false;
-  }
-
-  const authHeader = req.headers.authorization;
-  const xApiKey = req.headers["x-api-key"];
-  let provided: string | undefined;
-
-  if (authHeader?.startsWith("Bearer ")) provided = authHeader.slice(7);
-  else if (typeof xApiKey === "string") provided = xApiKey;
-
-  if (!provided || provided !== serviceKey) {
-    res.status(401).json({ error: { message: "Unauthorized", type: "invalid_request_error" } });
-    return false;
-  }
-
-  return true;
+  return ensureApiKey(req, res);
 }
 
 function getCompatibilitySettings(req: Request, res: Response) {

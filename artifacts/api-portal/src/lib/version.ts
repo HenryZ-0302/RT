@@ -1,3 +1,5 @@
+import { servicePaths } from "./service";
+
 export interface PortalVersionInfo {
   version: string;
   name?: string;
@@ -12,3 +14,24 @@ export const FALLBACK_VERSION_INFO: PortalVersionInfo = {
   releaseNotes:
     "v1.2.5：汇总 1.2.0-1.2.5 全量更新。完成门户界面重构与导航优化，补回统计页节点与模型开销展示，修复主题切换、设置向导、鉴权校验、生产环境提示与多处前端交互问题；新增统一版本展示、更新徽标与实例批量更新能力；完善模型管理与健康检查，统一提供商/能力分组、批量开关、测试与提示文案，清理 thinking-visible 别名并补齐 Gemini 3 Pro Preview 衍生模型；新增 Gemini 图片生成与编辑能力，支持 OpenAI 兼容 /v1/images/generations、Google 原生 generateImages、图片模型独立分组与统计隔离；新增 gpt-image-1 图片模型支持，并修复未知图片模型错误返回与 gpt-image-1 不兼容 response_format 的问题。",
 };
+
+export function mergePortalVersionInfo(
+  data: Partial<PortalVersionInfo> | null | undefined,
+): PortalVersionInfo {
+  return {
+    version: data?.version ?? FALLBACK_VERSION_INFO.version,
+    name: data?.name ?? FALLBACK_VERSION_INFO.name,
+    releaseDate: data?.releaseDate ?? FALLBACK_VERSION_INFO.releaseDate,
+    releaseNotes: data?.releaseNotes ?? FALLBACK_VERSION_INFO.releaseNotes,
+  };
+}
+
+export async function fetchPortalVersionInfo(baseUrl: string): Promise<PortalVersionInfo> {
+  const response = await fetch(servicePaths.release(baseUrl));
+  if (!response.ok) {
+    throw new Error(`Failed to load version info: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as Partial<PortalVersionInfo>;
+  return mergePortalVersionInfo(data);
+}

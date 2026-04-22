@@ -152,6 +152,7 @@ export function createAdminRouter(deps: {
   function listModels(_req: Request, res: Response) {
     const models = ALL_MODELS.map((model) => ({
       id: model.id,
+      description: model.description,
       provider: MODEL_REGISTRY.get(model.id)?.provider ?? "openrouter",
       capability: MODEL_REGISTRY.get(model.id)?.capability ?? "chat",
       group: MODEL_REGISTRY.get(model.id)?.group ?? "openrouter",

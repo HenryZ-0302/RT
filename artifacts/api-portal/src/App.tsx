@@ -15,7 +15,7 @@ import { getStoredServiceKey, servicePaths, storeServiceKey } from "./lib/servic
 // Define the types that App needs for State management
 type BackendStat = { calls: number; errors: number; streamingCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; avgDurationMs: number; avgTtftMs: number | null; health: string; url?: string; dynamic?: boolean; enabled?: boolean };
 type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
-interface ModelStatus { id: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
+interface ModelStatus { id: string; description?: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
 type MetricsResponse = {
   stats?: Record<string, Record<string, unknown>>;

@@ -7,13 +7,13 @@ import {
 } from "fs";
 import { resolve, join, dirname, relative } from "path";
 import {
-  getConfiguredUpstreamRepo,
-  getServiceAccessKey,
   getServiceUpdateUrl,
   getUpstreamRawVersionUrl,
   getUpstreamRepoConfig,
   getUpstreamRepoUrl,
 } from "../lib/serviceConfig";
+import { ensureApiKey } from "../middleware/auth";
+import { readLocalVersionInfo, type ServiceVersionInfo } from "../lib/version";
 
 const router: IRouter = Router();
 const execFileAsync = promisify(execFile);
@@ -39,13 +39,6 @@ function githubHeaders(withToken = true): Record<string, string> {
   return headers;
 }
 
-interface VersionInfo {
-  version: string;
-  name?: string;
-  releaseDate?: string;
-  releaseNotes?: string;
-}
-
 function sendUpdateError(
   res: Response,
   status: number,
@@ -53,21 +46,6 @@ function sendUpdateError(
   type: "server_error" | "invalid_request_error" | "conflict_error" = "server_error",
 ): void {
   res.status(status).json({ error: { message, type } });
-}
-
-function readLocalVersion(): VersionInfo {
-  const candidates = [
-    resolve(process.cwd(), "version.json"),
-    resolve(WORKSPACE_ROOT, "version.json"),
-  ];
-
-  for (const file of candidates) {
-    try {
-      if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8")) as VersionInfo;
-    } catch {}
-  }
-
-  return { version: "unknown" };
 }
 
 function parseVersion(version: string): { nums: number[]; pre: string } {
@@ -99,30 +77,13 @@ function isNewer(remote: string, local: string): boolean {
 }
 
 function checkApiKey(req: Request, res: Response): boolean {
-  const serviceKey = getServiceAccessKey();
-  if (!serviceKey) {
-    sendUpdateError(res, 500, "Service access key is not configured", "server_error");
-    return false;
-  }
-
-  const authHeader = req.headers.authorization;
-  const xApiKey = req.headers["x-api-key"];
-  let provided: string | undefined;
-
-  if (authHeader?.startsWith("Bearer ")) provided = authHeader.slice(7);
-  else if (typeof xApiKey === "string") provided = xApiKey;
-
-  if (!provided || provided !== serviceKey) {
-    sendUpdateError(res, 401, "Unauthorized", "invalid_request_error");
-    return false;
-  }
-
-  return true;
+  return ensureApiKey(req, res);
 }
 
 const BUNDLE_INCLUDE_DIRS = [
   "artifacts/api-server/src",
   "artifacts/api-portal/src",
+  "artifacts/api-portal/public",
 ];
 
 const BUNDLE_INCLUDE_FILES = [
@@ -135,13 +96,15 @@ const BUNDLE_INCLUDE_FILES = [
   "artifacts/api-server/package.json",
   "artifacts/api-server/tsconfig.json",
   "package.json",
+  "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "tsconfig.json",
   "tsconfig.base.json",
   "README.md",
+  "AGENTS.md",
 ];
 
-const BUNDLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml"]);
+const BUNDLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml", ".svg"]);
 const BUNDLE_EXCLUDE = new Set(["node_modules", "dist", ".git", ".cache"]);
 
 function scanDir(dir: string): Record<string, string> {
@@ -251,11 +214,11 @@ function deriveBundleUrl(checkUrl: string): string {
 }
 
 function getUpstreamRepoUrlForUi(): string | undefined {
-  return getConfiguredUpstreamRepo() ? getUpstreamRepoUrl() : undefined;
+  return getUpstreamRepoUrl();
 }
 
 async function sendVersion(_req: Request, res: Response) {
-  const local = readLocalVersion();
+  const local = readLocalVersionInfo();
   const checkUrl = getServiceUpdateUrl() || getUpstreamRawVersionUrl();
 
   try {
@@ -265,7 +228,7 @@ async function sendVersion(_req: Request, res: Response) {
     clearTimeout(timer);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    const remote = await response.json() as VersionInfo;
+    const remote = await response.json() as ServiceVersionInfo;
     res.json({
       ...local,
       hasUpdate: isNewer(remote.version, local.version),
@@ -287,7 +250,7 @@ async function sendVersion(_req: Request, res: Response) {
 
 function sendBundle(_req: Request, res: Response) {
   try {
-    const local = readLocalVersion();
+    const local = readLocalVersionInfo();
     const files = buildBundle();
     res.json({
       version: local.version,

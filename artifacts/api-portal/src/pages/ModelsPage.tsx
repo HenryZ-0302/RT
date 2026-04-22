@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
-interface ModelStatus { id: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
+interface ModelStatus { id: string; description?: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
 type Provider = "openai" | "anthropic" | "gemini" | "openrouter";
 type GroupKey = "openai" | "openai_image" | "anthropic" | "gemini" | "gemini_image" | "openrouter";
@@ -158,7 +158,7 @@ function buildFallbackEntry(model: ModelStatus): ModelEntry {
     id: model.id,
     label: formatFallbackLabel(model.id),
     provider: model.provider,
-    desc: "来自服务端注册表的模型",
+    desc: model.description ?? "来自服务端注册表的模型",
     badge,
   };
 }
