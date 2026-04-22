@@ -5,6 +5,7 @@ import {
   BarChart2, 
   Server, 
   Waypoints,
+  MessageSquare,
   ScrollText, 
   BookOpen,
   Sun,
@@ -20,6 +21,7 @@ import { cn } from "../lib/utils";
 
 const NAV_ITEMS = [
   { href: "/", label: "仪表盘", icon: LayoutDashboard },
+  { href: "/chat", label: "在线聊天", icon: MessageSquare },
   { href: "/stats", label: "统计", icon: BarChart2 },
   { href: "/nodes", label: "子节点", icon: Waypoints },
   { href: "/models", label: "模型", icon: Server },
@@ -30,6 +32,7 @@ const NAV_ITEMS = [
 
 const PAGE_TITLES: Record<string, string> = {
   "/": "仪表盘",
+  "/chat": "在线聊天",
   "/stats": "统计",
   "/nodes": "子节点",
   "/models": "模型",

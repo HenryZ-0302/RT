@@ -6,6 +6,7 @@ import { AppLayout } from "./layouts/AppLayout";
 import { ThemeProvider } from "./components/theme-provider";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DocsPage } from "./pages/DocsPage";
+import { ChatPage } from "./pages/ChatPage";
 import { HomePage } from "./pages/HomePage";
 import { NodesPage } from "./pages/NodesPage";
 import { StatsPage } from "./pages/StatsPage";
@@ -420,6 +421,13 @@ export default function App() {
               <DashboardPage
                 baseUrl={baseUrl}
                 displayUrl={displayUrl}
+              />
+            </Route>
+            <Route path="/chat">
+              <ChatPage
+                baseUrl={baseUrl}
+                apiKey={apiKey}
+                modelStatus={modelStatus}
               />
             </Route>
             <Route path="/stats">
