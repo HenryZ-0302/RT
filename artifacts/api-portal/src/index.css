@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -40,57 +41,57 @@
 }
 
 :root {
-  --background: 210 40% 98%;
-  --foreground: 222.2 84% 4.9%;
+  --background: 205 45% 97%;
+  --foreground: 222 38% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  --card-foreground: 222 38% 11%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  --primary: 246 83% 58%; /* vibrant purple-indigo */
+  --popover-foreground: 222 38% 11%;
+  --primary: 214 88% 54%;
   --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
+  --secondary: 204 34% 94%;
+  --secondary-foreground: 221 36% 18%;
+  --muted: 204 28% 92%;
+  --muted-foreground: 215 18% 40%;
+  --accent: 34 100% 92%;
+  --accent-foreground: 221 36% 18%;
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 246 83% 58%;
+  --border: 206 30% 86%;
+  --input: 206 30% 88%;
+  --ring: 214 88% 54%;
   
-  --sidebar-bg: 210 40% 98%;
-  --sidebar-border: 214.3 31.8% 91.4%;
+  --sidebar-bg: 203 46% 98%;
+  --sidebar-border: 206 28% 84%;
 
-  --app-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --app-font-mono: 'JetBrains Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  --app-font-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --app-font-mono: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
   --radius: 0.75rem;
 }
 
 .dark {
-  --background: 222 47% 11%;
-  --foreground: 214 32% 91%;
-  --card: 222 42% 14%;
+  --background: 221 36% 8%;
+  --foreground: 214 30% 92%;
+  --card: 223 26% 12%;
   --card-foreground: 214 32% 91%;
-  --popover: 222 47% 11%;
+  --popover: 221 36% 8%;
   --popover-foreground: 214 32% 91%;
-  --primary: 246 83% 58%; /* vibrant purple-indigo */
+  --primary: 199 95% 61%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 222 40% 18%;
-  --secondary-foreground: 214 32% 80%;
-  --muted: 222 40% 16%;
-  --muted-foreground: 215 20% 55%;
-  --accent: 222 40% 18%;
-  --accent-foreground: 214 32% 80%;
+  --secondary: 220 22% 16%;
+  --secondary-foreground: 214 28% 82%;
+  --muted: 220 18% 15%;
+  --muted-foreground: 214 16% 62%;
+  --accent: 31 55% 18%;
+  --accent-foreground: 35 86% 82%;
   --destructive: 0 72% 61%;
   --destructive-foreground: 0 0% 100%;
-  --border: 217 32% 20%;
-  --input: 217 32% 18%;
-  --ring: 246 83% 58%;
+  --border: 216 20% 18%;
+  --input: 217 20% 16%;
+  --ring: 199 95% 61%;
 
-  --sidebar-bg: 222 47% 9%;
-  --sidebar-border: 217 32% 17%;
+  --sidebar-bg: 221 34% 10%;
+  --sidebar-border: 216 18% 17%;
 }
 
 @layer base {
@@ -101,12 +102,47 @@
   }
 
   body {
-    background: hsl(var(--background));
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 12% 18%, hsl(var(--primary) / 0.16), transparent 24%),
+      radial-gradient(circle at 88% 12%, hsl(35 96% 56% / 0.15), transparent 18%),
+      radial-gradient(circle at 52% 100%, hsl(173 63% 42% / 0.14), transparent 26%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
     color: hsl(var(--foreground));
     font-family: var(--app-font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.3s ease, color 0.3s ease;
+    position: relative;
+    isolation: isolate;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 128px 128px;
+    mask-image: radial-gradient(circle at center, black, transparent 78%);
+    opacity: 0.55;
+    z-index: -2;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: auto -10vw -18vh auto;
+    width: 36rem;
+    height: 36rem;
+    border-radius: 9999px;
+    background: radial-gradient(circle, hsl(var(--primary) / 0.14), transparent 68%);
+    filter: blur(20px);
+    pointer-events: none;
+    z-index: -1;
   }
 }
 
@@ -118,6 +154,11 @@
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.22);
+  color: hsl(var(--foreground));
 }
 
 ::-webkit-scrollbar {

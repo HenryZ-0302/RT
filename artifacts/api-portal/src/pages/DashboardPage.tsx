@@ -101,10 +101,14 @@ export function DashboardPage({
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <Card className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border-primary/20 shadow-md shadow-primary/5">
+      <Card className="border-primary/20 shadow-[0_28px_90px_-54px_rgba(37,99,235,0.65)] bg-gradient-to-br from-white/80 via-primary/5 to-transparent dark:from-slate-950/60 dark:via-primary/10 dark:to-transparent">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute right-[-5rem] top-[-4rem] h-44 w-44 rounded-full bg-primary/20 blur-3xl" />
+          <div className="absolute bottom-[-5rem] left-[-3rem] h-40 w-40 rounded-full bg-amber-300/15 blur-3xl" />
+        </div>
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="space-y-3">
-            <div className="text-sm font-bold tracking-widest uppercase text-primary/80">仪表盘</div>
+            <div className="inline-flex items-center rounded-full border border-primary/15 bg-white/75 dark:bg-slate-900/55 px-3 py-1.5 text-[11px] font-bold tracking-[0.28em] uppercase text-primary/80">控制台总览</div>
             <div>
               <div className="flex flex-wrap items-center gap-3 mb-2">
                 <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">{greeting.title}</h1>

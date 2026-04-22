@@ -331,10 +331,14 @@ export default function App() {
   if (!gateReady || online === null) {
     return (
       <ThemeProvider>
-        <div className="flex h-screen items-center justify-center bg-background text-muted-foreground p-4">
-          <div className="flex flex-col items-center gap-4">
-             <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
-             <div className="font-mono text-sm">正在连接服务器...</div>
+        <div className="relative flex h-screen items-center justify-center text-muted-foreground p-4 overflow-hidden">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -left-24 top-12 h-64 w-64 rounded-full bg-primary/20 blur-3xl" />
+            <div className="absolute right-[-6rem] top-[-2rem] h-72 w-72 rounded-full bg-amber-400/20 blur-3xl" />
+          </div>
+          <div className="flex flex-col items-center gap-4 rounded-[28px] border border-white/55 dark:border-white/8 bg-white/55 dark:bg-slate-950/40 px-8 py-10 backdrop-blur-2xl shadow-[0_30px_100px_-54px_rgba(15,23,42,0.9)]">
+             <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+             <div className="font-mono text-sm tracking-wide">正在连接服务器...</div>
           </div>
         </div>
       </ThemeProvider>
@@ -346,13 +350,20 @@ export default function App() {
     return (
       <ThemeProvider>
         <AppLayout isSetup>
-          <div className="w-full max-w-md mx-auto relative bg-card text-card-foreground p-8 rounded-2xl shadow-xl shadow-black/5 border border-border/50 overflow-hidden animate-in fade-in zoom-in-95 duration-500">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/80 via-purple-500/80 to-primary/80" />
+          <div className="w-full max-w-md mx-auto relative bg-white/68 dark:bg-slate-950/58 text-card-foreground p-8 rounded-[30px] shadow-[0_40px_110px_-56px_rgba(15,23,42,0.95)] border border-white/60 dark:border-white/10 overflow-hidden animate-in fade-in zoom-in-95 duration-500 backdrop-blur-2xl">
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute -top-16 right-[-3rem] h-40 w-40 rounded-full bg-primary/18 blur-3xl" />
+              <div className="absolute bottom-[-4rem] left-[-2rem] h-36 w-36 rounded-full bg-amber-400/18 blur-3xl" />
+            </div>
+            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white/90 to-transparent dark:via-white/20" />
             <h1 className="text-2xl font-bold mb-2 flex items-center justify-center gap-3 tracking-tight">
-               <span className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center text-lg shadow-inner">R</span>
-               Unified Layer
+               <span className="w-10 h-10 rounded-2xl border border-white/55 dark:border-white/10 bg-white/80 dark:bg-slate-900/70 text-primary flex items-center justify-center text-lg shadow-inner">R</span>
+               RT Portal
             </h1>
-            <p className="text-sm text-center text-muted-foreground mb-8 text-balance">
+            <p className="text-[11px] text-center uppercase tracking-[0.32em] text-primary/70 mb-3">
+              Self-hosted Control Surface
+            </p>
+            <p className="text-sm text-center text-muted-foreground mb-8 text-balance leading-relaxed">
                在此处输入服务的主控密码进行身份验证。
             </p>
             <form onSubmit={async (e) => { e.preventDefault(); await verifyServiceKey(gateKey); }}>
@@ -362,7 +373,7 @@ export default function App() {
                   placeholder="请输入服务访问密码"
                   value={gateKey}
                   onChange={(e) => setGateKey(e.target.value)}
-                  className="w-full px-4 py-3 bg-secondary border border-border rounded-xl text-center font-mono focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-sm mb-2"
+                  className="w-full px-4 py-3 bg-white/75 dark:bg-slate-900/65 border border-white/60 dark:border-white/10 rounded-2xl text-center font-mono focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all text-sm mb-2 backdrop-blur-xl"
                 />
                 {gateError && <p className="text-xs text-destructive text-center font-medium mt-2">{gateError}</p>}
                 {!online && <p className="text-xs text-amber-500 text-center font-medium mt-2">后端服务未响应，请检查是否已启动</p>}
@@ -370,7 +381,7 @@ export default function App() {
               <button
                 type="submit"
                 disabled={gateLoading || !online}
-                className="w-full py-3 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="w-full py-3 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold shadow-[0_24px_60px_-30px_rgba(37,99,235,0.85)] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 {gateLoading ? "验证中..." : "进入仪表盘"}
               </button>
