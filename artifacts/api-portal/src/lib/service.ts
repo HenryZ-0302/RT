@@ -1,15 +1,13 @@
 export const SERVICE_STORAGE_KEY = "service_access_key";
-export const LEGACY_STORAGE_KEY = "proxy_api_key";
 export const SERVICE_KEY_ENV = "SERVICE_ACCESS_KEY";
 export const NODE_HEALTHCHECK_MODEL_KEY = "node_healthcheck_model";
 
 export function getStoredServiceKey(): string {
-  return localStorage.getItem(SERVICE_STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY) ?? "";
+  return localStorage.getItem(SERVICE_STORAGE_KEY) ?? "";
 }
 
 export function storeServiceKey(value: string): void {
   localStorage.setItem(SERVICE_STORAGE_KEY, value);
-  localStorage.setItem(LEGACY_STORAGE_KEY, value);
 }
 
 export function getStoredNodeHealthcheckModel(): string {

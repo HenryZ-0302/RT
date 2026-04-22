@@ -3,16 +3,14 @@ const DEFAULT_GITHUB_REPO = "RT";
 const DEFAULT_GITHUB_BRANCH = "mask";
 
 export const SERVICE_ACCESS_KEY_ENV = "SERVICE_ACCESS_KEY";
-export const LEGACY_ACCESS_KEY_ENV = "PROXY_API_KEY";
 export const SERVICE_UPDATE_URL_ENV = "SERVICE_UPDATE_URL";
-export const LEGACY_UPDATE_URL_ENV = "UPDATE_CHECK_URL";
 
 export function getServiceAccessKey(): string | undefined {
-  return process.env[SERVICE_ACCESS_KEY_ENV] || process.env[LEGACY_ACCESS_KEY_ENV];
+  return process.env[SERVICE_ACCESS_KEY_ENV];
 }
 
 export function getServiceUpdateUrl(): string | undefined {
-  return process.env[SERVICE_UPDATE_URL_ENV] || process.env[LEGACY_UPDATE_URL_ENV];
+  return process.env[SERVICE_UPDATE_URL_ENV];
 }
 
 export function getConfiguredUpstreamRepo(): string | undefined {
