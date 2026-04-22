@@ -47,7 +47,8 @@ export default defineConfig({
   },
   server: {
     port,
-    host: "0.0.0.0",
+    host: true,
+    strictPort: true,
     allowedHosts: true,
     proxy: {
       "/api": {
@@ -62,7 +63,8 @@ export default defineConfig({
   },
   preview: {
     port,
-    host: "0.0.0.0",
+    host: true,
+    strictPort: true,
     allowedHosts: true,
   },
 });

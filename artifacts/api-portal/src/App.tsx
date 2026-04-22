@@ -28,7 +28,7 @@ type DataError = false | "auth" | "server" | "network";
 export default function App() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [sillyTavernMode, setSillyTavernMode] = useState(false);
-  const [stLoading, setStLoading] = useState(true);
+  const [stLoading, setStLoading] = useState(false);
   const [apiKey, setApiKey] = useState(() => getStoredServiceKey());
   const [gateKey, setGateKey] = useState(() => getStoredServiceKey());
   const [gateReady, setGateReady] = useState(false);
@@ -70,15 +70,26 @@ export default function App() {
     } catch { setOnline(false); }
   }, [baseUrl]);
 
-  const fetchSTMode = useCallback(async () => {
+  const fetchSTMode = useCallback(async (key: string) => {
+    const trimmed = key.trim();
+    if (!trimmed) {
+      setStLoading(false);
+      return;
+    }
+
+    setStLoading(true);
     try {
-      const key = getStoredServiceKey();
       const res = await fetch(servicePaths.compatibility(baseUrl), {
-        headers: key ? { Authorization: `Bearer ${key}` } : {},
+        headers: { Authorization: `Bearer ${trimmed}` },
       });
-      if (res.ok) { const d = await res.json(); setSillyTavernMode(d.enabled); }
+      if (res.ok) {
+        const d = await res.json();
+        setSillyTavernMode(Boolean(d.enabled));
+      }
     } catch {}
-    setStLoading(false);
+    finally {
+      setStLoading(false);
+    }
   }, [baseUrl]);
 
   const toggleSTMode = async () => {
@@ -100,6 +111,7 @@ export default function App() {
       setGateError("请输入服务密钥。");
       setGateReady(true);
       setGateUnlocked(false);
+      setStLoading(false);
       return false;
     }
 
@@ -119,6 +131,7 @@ export default function App() {
         }
         setGateReady(true);
         setGateUnlocked(false);
+        setStLoading(false);
         return false;
       }
 
@@ -127,6 +140,7 @@ export default function App() {
       setGateKey(trimmed);
       storeServiceKey(trimmed);
       applyMetricsPayload(data);
+      setStLoading(true);
       setGateUnlocked(true);
       setGateReady(true);
       return true;
@@ -134,6 +148,7 @@ export default function App() {
       setGateError("无法连接到服务，请稍后重试。");
       setGateReady(true);
       setGateUnlocked(false);
+      setStLoading(false);
       return false;
     } finally {
       setGateLoading(false);
@@ -315,12 +330,15 @@ export default function App() {
   };
 
   useEffect(() => { checkHealth(); }, [checkHealth]);
-  useEffect(() => { fetchSTMode(); }, [fetchSTMode]);
   useEffect(() => { 
     const initialKey = getStoredServiceKey();
     if (initialKey) verifyServiceKey(initialKey); 
     else setGateReady(true); 
   }, [verifyServiceKey]);
+  useEffect(() => {
+    if (!gateUnlocked || !apiKey) return;
+    void fetchSTMode(apiKey);
+  }, [apiKey, fetchSTMode, gateUnlocked]);
   useEffect(() => {
     if (!gateUnlocked) return;
     fetchModels(apiKey);

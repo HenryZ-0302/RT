@@ -89,6 +89,8 @@ const BUNDLE_INCLUDE_DIRS = [
 const BUNDLE_INCLUDE_FILES = [
   "version.json",
   "artifacts/api-portal/index.html",
+  "artifacts/api-server/.replit-artifact/artifact.toml",
+  "artifacts/api-portal/.replit-artifact/artifact.toml",
   "artifacts/api-server/build.mjs",
   "artifacts/api-portal/package.json",
   "artifacts/api-portal/tsconfig.json",

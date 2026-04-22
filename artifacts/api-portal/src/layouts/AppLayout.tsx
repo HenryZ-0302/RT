@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { 
   LayoutDashboard, 
@@ -68,9 +68,16 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const [location] = useLocation();
+  const isDarkMode =
+    theme === "dark" ||
+    (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const pageTitle = PAGE_TITLES[location] ?? location.slice(1);
   const pageDescription = PAGE_DESCRIPTIONS[location] ?? "自用控制台。";
   const pageBadge = PAGE_BADGES[location] ?? "Portal";
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location]);
 
   if (isSetup) {
     return (
@@ -80,12 +87,13 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
           <div className="absolute right-[-6rem] top-[-2rem] h-72 w-72 rounded-full bg-amber-400/20 blur-3xl" />
           <div className="absolute bottom-[-10rem] left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-emerald-400/15 blur-3xl" />
         </div>
-        <div className="absolute top-6 right-6">
+        <div className="absolute top-5 right-5 z-20 sm:top-6 sm:right-6">
            <button 
-             onClick={() => setTheme((theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? 'light' : 'dark')} 
-             className="h-11 w-11 rounded-full border border-white/50 dark:border-white/10 bg-white/55 dark:bg-slate-950/45 backdrop-blur-xl hover:bg-white/80 dark:hover:bg-slate-900/60 transition-colors text-muted-foreground hover:text-foreground shadow-[0_18px_50px_-28px_rgba(15,23,42,0.65)]"
+             onClick={() => setTheme(isDarkMode ? "light" : "dark")}
+             className="flex h-11 w-11 items-center justify-center rounded-full border border-white/50 dark:border-white/10 bg-white/55 dark:bg-slate-950/45 backdrop-blur-xl hover:bg-white/80 dark:hover:bg-slate-900/60 transition-all duration-300 text-muted-foreground hover:text-foreground shadow-[0_18px_50px_-28px_rgba(15,23,42,0.65)]"
+             aria-label="Toggle theme"
            >
-              {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
+              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
            </button>
         </div>
         <div className="w-full max-w-2xl px-4 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
@@ -104,7 +112,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
       </div>
       {/* Sidebar (Desktop) */}
       <aside className={cn(
-        "hidden md:flex flex-col border-r transition-all duration-300 ease-in-out relative z-20 shadow-[18px_0_60px_-46px_rgba(15,23,42,0.85)] backdrop-blur-2xl",
+        "hidden md:flex flex-col border-r transition-[width,background-color,border-color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] relative z-20 shadow-[18px_0_60px_-46px_rgba(15,23,42,0.85)] backdrop-blur-2xl",
         "bg-white/50 dark:bg-slate-950/45 border-white/40 dark:border-white/8",
         collapsed ? "w-[80px]" : "w-[240px]"
       )}>
@@ -116,25 +124,31 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
                  R
                </div>
              </div>
-             {!collapsed && (
-               <div className="min-w-0">
+             <div
+               className={cn(
+                 "min-w-0 overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                 collapsed ? "max-w-0 opacity-0 -translate-x-2" : "max-w-[10rem] opacity-100 translate-x-0 delay-75",
+               )}
+             >
                  <div className="text-[11px] uppercase tracking-[0.26em] text-primary/75">RT</div>
                  <span className="block font-extrabold text-[15px] tracking-wide whitespace-nowrap text-foreground">Control Surface</span>
-               </div>
-             )}
+             </div>
           </div>
         </div>
 
         <div className="flex-1 py-6 flex flex-col gap-1.5 px-3 overflow-y-auto">
-          {!collapsed && (
-            <div className="px-3 pb-3">
+          <div
+            className={cn(
+              "px-3 overflow-hidden transition-[max-height,opacity,transform,padding] duration-400 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              collapsed ? "max-h-0 pb-0 opacity-0 -translate-y-2 pointer-events-none" : "max-h-40 pb-3 opacity-100 translate-y-0",
+            )}
+          >
               <div className="rounded-2xl border border-white/55 dark:border-white/8 bg-white/55 dark:bg-slate-900/45 px-3 py-3 backdrop-blur-xl">
                 <div className="text-[11px] uppercase tracking-[0.24em] text-primary/70">Workspace</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">Self-hosted Portal</div>
                 <div className="mt-1 text-xs leading-relaxed text-muted-foreground">集中管理模型、节点、日志和统计。</div>
               </div>
-            </div>
-          )}
+          </div>
           {NAV_ITEMS.map((item) => {
             const isActive = location === item.href;
             const Icon = item.icon;
@@ -154,7 +168,14 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
                   <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-primary rounded-r-full" />
                 )}
                 <Icon size={18} className={cn("flex-shrink-0", isActive && "text-primary")} />
-                {!collapsed && <span className="text-sm">{item.label}</span>}
+                <span
+                  className={cn(
+                    "overflow-hidden whitespace-nowrap text-sm transition-[max-width,opacity,transform] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                    collapsed ? "max-w-0 opacity-0 -translate-x-2" : "max-w-[8rem] opacity-100 translate-x-0 delay-75",
+                  )}
+                >
+                  {item.label}
+                </span>
                 {collapsed && (
                   <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-popover/95 text-popover-foreground text-xs font-medium rounded-xl shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 border border-border/60 scale-95 group-hover:scale-100 transition-all origin-left backdrop-blur-md">
                     {item.label}
@@ -168,7 +189,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
         <div className="p-4 border-t border-white/40 dark:border-white/8 flex justify-center flex-shrink-0">
           <button 
             onClick={() => setCollapsed(!collapsed)}
-            className="h-11 w-11 rounded-2xl text-muted-foreground hover:bg-white/55 dark:hover:bg-slate-900/45 hover:text-foreground transition-colors border border-white/45 dark:border-white/8"
+            className="flex h-11 w-11 items-center justify-center rounded-2xl text-muted-foreground hover:bg-white/55 dark:hover:bg-slate-900/45 hover:text-foreground transition-all duration-300 border border-white/45 dark:border-white/8"
           >
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
@@ -213,11 +234,11 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
                Replit Self Use
              </div>
              <button
-               onClick={() => setTheme((theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) ? 'light' : 'dark')}
+               onClick={() => setTheme(isDarkMode ? "light" : "dark")}
                className="h-11 w-11 rounded-2xl border border-white/55 dark:border-white/8 bg-white/55 dark:bg-slate-900/50 hover:bg-white/80 dark:hover:bg-slate-900/65 text-muted-foreground hover:text-foreground transition-all flex items-center justify-center shadow-[0_20px_50px_-30px_rgba(15,23,42,0.8)]"
                aria-label="Toggle theme"
              >
-               {theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches) ? <Sun size={16} className="text-yellow-500" /> : <Moon size={16} className="text-indigo-500" />}
+               {isDarkMode ? <Sun size={16} className="text-yellow-500" /> : <Moon size={16} className="text-indigo-500" />}
              </button>
            </div>
         </header>
@@ -235,10 +256,26 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
       </div>
 
       {/* Mobile Drawer */}
-      {mobileMenuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
-          <div className="absolute top-0 bottom-0 left-0 w-72 bg-white/72 dark:bg-slate-950/72 border-r border-white/45 dark:border-white/8 shadow-xl backdrop-blur-2xl animate-in slide-in-from-left">
+      <div
+        className={cn(
+          "fixed inset-0 z-50 md:hidden transition-opacity duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+          mobileMenuOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+        )}
+        aria-hidden={!mobileMenuOpen}
+      >
+          <div
+            className={cn(
+              "absolute inset-0 bg-background/72 backdrop-blur-md transition-opacity duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              mobileMenuOpen ? "opacity-100" : "opacity-0",
+            )}
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div
+            className={cn(
+              "absolute top-0 bottom-0 left-0 w-72 transform-gpu bg-white/72 dark:bg-slate-950/72 border-r border-white/45 dark:border-white/8 shadow-xl backdrop-blur-2xl transition-transform duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              mobileMenuOpen ? "translate-x-0" : "-translate-x-full",
+            )}
+          >
             <div className="h-20 flex items-center justify-between px-4 border-b border-white/40 dark:border-white/8">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.24em] text-primary/70">Navigation</div>
@@ -267,8 +304,7 @@ export function AppLayout({ children, isSetup }: { children: React.ReactNode, is
               ))}
             </div>
           </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
