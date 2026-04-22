@@ -104,6 +104,7 @@ const BUNDLE_INCLUDE_FILES = [
   "tsconfig.base.json",
   "README.md",
   "AGENTS.md",
+  "INSTALL.md",
 ];
 
 const BUNDLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml", ".svg"]);

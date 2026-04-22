@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, CheckCircle2, Copy, Loader2, Settings, X } from "lucide-react";
+import { Activity, CheckCircle2, ChevronDown, ChevronUp, Copy, Loader2, Settings, X } from "lucide-react";
 import { SERVICE_KEY_ENV, servicePaths } from "../lib/service";
 import { cn } from "../lib/utils";
 
@@ -24,7 +24,7 @@ function buildSetupPrompt(
   if (options.needKey) {
     steps.push(
       `步骤 ${++step}：设置服务访问密钥\n` +
-      `由于平台安全限制，你不能直接写入 Secret。请触发平台的 Secret 输入流程，让我手动填写以下键值：\n` +
+      `请触发平台的 Secret 输入流程，让我手动填写以下键值：\n` +
       `${SERVICE_KEY_ENV} = <由我在弹窗中输入自定义密钥>\n` +
       `不要要求我先在网页里输入这个值，也不要要求我在聊天里重复发送这个值。`,
     );
@@ -115,6 +115,7 @@ function StatusItem({ label, ready }: { label: string; ready: boolean }) {
 export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [checking, setChecking] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const checkSetupStatus = useCallback(async () => {
     setChecking(true);
@@ -153,6 +154,13 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
 
   const isComplete = !!status?.configured && !!status.integrationsReady && !!status.storageReady;
   const showPrompt = !!status && !isComplete && !!prompt;
+  const completedCount = [status?.configured, status?.integrationsReady, status?.storageReady].filter(Boolean).length;
+  const remainingCount = Math.max(0, 3 - completedCount);
+  const summaryText = checking || !status
+    ? "正在检查服务状态..."
+    : isComplete
+      ? "已配置完成"
+      : `还有 ${remainingCount} 项待处理`;
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-background/80 p-4 backdrop-blur-md">
@@ -175,31 +183,59 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
 
         <div className="space-y-5 p-5">
           <div className="rounded-xl border border-border/60 bg-secondary/20 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-medium">当前状态</div>
-                <div className="text-xs text-muted-foreground">先检测，再只处理缺失项。</div>
+                <div className="text-sm font-medium">配置检测</div>
+                <div className="text-xs text-muted-foreground">{summaryText}</div>
               </div>
-              <button
-                onClick={() => void checkSetupStatus()}
-                disabled={checking}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary disabled:opacity-50"
-              >
-                {checking ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
-                重新检测
-              </button>
+              <div className="flex items-center gap-2">
+                {!checking && status && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                      isComplete
+                        ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
+                        : "border-amber-500/20 bg-amber-500/10 text-amber-500",
+                    )}
+                  >
+                    {isComplete ? "已完成" : "未完成"}
+                  </span>
+                )}
+                <button
+                  onClick={() => setDetailsOpen((open) => !open)}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary"
+                >
+                  {detailsOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  {detailsOpen ? "收起详情" : "展开详情"}
+                </button>
+              </div>
             </div>
 
-            {checking || !status ? (
-              <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-3 text-sm text-muted-foreground">
-                <Loader2 size={14} className="animate-spin" />
-                正在检查服务状态...
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <StatusItem label="服务访问密钥" ready={status.configured} />
-                <StatusItem label="平台集成" ready={status.integrationsReady} />
-                <StatusItem label="云端存储" ready={status.storageReady} />
+            {detailsOpen && (
+              <div className="mt-4 space-y-3">
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => void checkSetupStatus()}
+                    disabled={checking}
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary disabled:opacity-50"
+                  >
+                    {checking ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />}
+                    重新检测
+                  </button>
+                </div>
+
+                {checking || !status ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-3 text-sm text-muted-foreground">
+                    <Loader2 size={14} className="animate-spin" />
+                    正在检查服务状态...
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <StatusItem label="服务访问密钥" ready={status.configured} />
+                    <StatusItem label="平台集成" ready={status.integrationsReady} />
+                    <StatusItem label="云端存储" ready={status.storageReady} />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -214,22 +250,12 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
             </div>
           )}
 
-          {!!status && !status.configured && (
-            <div className="rounded-xl border border-border/60 bg-secondary/20 p-4">
-              <div className="mb-2 text-sm font-medium">服务访问密钥说明</div>
-              <p className="mb-3 text-xs text-muted-foreground">
-                由于 Replit 平台限制，Agent 不能直接写入 {SERVICE_KEY_ENV}。向导会直接生成提示词，
-                由 Agent 触发 Secret 弹窗，再由你手动输入想要的密钥，不再需要先在网页里输入一次。
-              </p>
-            </div>
-          )}
-
           {showPrompt && (
             <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/20 p-4">
               <div>
                 <div className="text-sm font-medium">执行补全配置</div>
                 <p className="text-xs text-muted-foreground">
-                  把下面整段指令发给平台 Agent。执行并重启工作流后，再点上面的“重新检测”。
+                  把下面整段指令发给平台 Agent，跟着 Agent 的要求一步步操作。完成后再点“重新检测”。
                 </p>
               </div>
               <CopyableBlock text={prompt} />
@@ -238,7 +264,7 @@ export default function SetupWizard({ baseUrl, onComplete, onDismiss }: Props) {
         </div>
 
         <div className="flex items-center justify-between border-t bg-secondary/20 px-5 py-4">
-          <div className="text-xs text-muted-foreground">向导只负责检测状态和生成操作指令。</div>
+          <div className="text-xs text-muted-foreground">先复制指令，再按 Agent 的提示一步步完成。</div>
           <div className="flex gap-2">
             <button
               onClick={onDismiss}
