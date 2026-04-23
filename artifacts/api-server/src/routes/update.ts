@@ -82,8 +82,6 @@ function checkApiKey(req: Request, res: Response): boolean {
 
 const BUNDLE_INCLUDE_DIRS = [
   "artifacts/api-server/src",
-  "artifacts/api-server/scripts",
-  "artifacts/api-server/config",
   "docs",
   "artifacts/api-portal/src",
   "artifacts/api-portal/public",

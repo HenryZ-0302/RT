@@ -7,12 +7,16 @@ import {
   ChevronRight,
   Filter,
   Loader2,
+  BookOpen,
+  Copy,
   Power,
   RefreshCw,
   Search,
+  SearchCheck,
   ShieldAlert,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { MODEL_DISCOVERY_PROMPT, MODEL_DISCOVERY_PROMPT_PATH } from "../lib/modelDiscoveryPrompt";
 
 interface ModelStatus {
   id: string;
@@ -218,6 +222,7 @@ export function ModelsPage({
   const [searchQuery, setSearchQuery] = useState("");
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [checkNotice, setCheckNotice] = useState<CheckNotice | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
 
   useEffect(() => {
     if (!checkNotice) return;
@@ -236,6 +241,21 @@ export function ModelsPage({
   const handleToggleGroup = (group: string, enabled: boolean) => {
     if (!enabled && !window.confirm("确认要关闭这一整组模型吗？关闭后客户端将无法发现和调用它们。")) return;
     onToggleProvider(group, enabled);
+  };
+
+  const copyDiscoveryPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(MODEL_DISCOVERY_PROMPT);
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = MODEL_DISCOVERY_PROMPT;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setPromptCopied(true);
+    window.setTimeout(() => setPromptCopied(false), 2000);
   };
 
   const testModel = async (modelId: string) => {
@@ -394,6 +414,42 @@ export function ModelsPage({
             <RefreshCw size={13} />
             刷新模型
           </button>
+        </div>
+      </Card>
+
+      <Card className="border-cyan-500/20 bg-cyan-500/5 shadow-none">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-300 mb-2">
+              <SearchCheck size={16} />
+              <h2 className="text-sm font-bold">注册表模型和工作区可用模型不是同一件事</h2>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed m-0">
+              这里控制的是后端注册并对外暴露的模型。要确认 Replit 当前真实可用的新模型，请使用 <code className="font-mono text-foreground">{MODEL_DISCOVERY_PROMPT_PATH}</code> 里的 Agent 提示词。
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 md:justify-end">
+            <button
+              type="button"
+              onClick={copyDiscoveryPrompt}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors",
+                promptCopied
+                  ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                  : "bg-background text-muted-foreground hover:text-foreground hover:bg-secondary border-border",
+              )}
+            >
+              {promptCopied ? <Check size={13} /> : <Copy size={13} />}
+              {promptCopied ? "已复制" : "复制发现提示词"}
+            </button>
+            <a
+              href="/docs#model-discovery"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-background text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            >
+              <BookOpen size={13} />
+              查看文档
+            </a>
+          </div>
         </div>
       </Card>
 

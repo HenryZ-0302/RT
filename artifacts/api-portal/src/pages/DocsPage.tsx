@@ -10,13 +10,15 @@ import {
   Zap,
   Info,
   BookOpen,
+  SearchCheck,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { MODEL_DISCOVERY_PROMPT, MODEL_DISCOVERY_PROMPT_PATH } from "../lib/modelDiscoveryPrompt";
 import { FALLBACK_VERSION_INFO, fetchPortalVersionInfo, type PortalVersionInfo } from "../lib/version";
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card({ children, className, id }: { children: React.ReactNode; className?: string; id?: string }) {
   return (
-    <div className={cn("bg-card text-card-foreground rounded-xl border border-border/50 shadow-sm p-6 overflow-hidden relative", className)}>
+    <div id={id} className={cn("bg-card text-card-foreground rounded-xl border border-border/50 shadow-sm p-6 overflow-hidden relative", className)}>
       {children}
     </div>
   );
@@ -153,6 +155,31 @@ export function DocsPage({ displayUrl }: { displayUrl: string }) {
           ))}
         </div>
       </div>
+
+      <Card id="model-discovery" className="border-cyan-500/20 bg-cyan-500/5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-3 text-cyan-700 dark:text-cyan-300">
+              <SearchCheck size={18} />
+              <h2 className="text-sm font-bold tracking-widest uppercase">模型发现提示词</h2>
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed m-0">
+              当前模型页展示的是后端注册表，不是 Replit 工作区真实可用模型的自动枚举结果。需要重新确认平台当前支持哪些模型时，请把这段提示词交给 Agent 执行。
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="rounded-md border border-border/60 bg-background/70 px-2 py-1 font-mono">{MODEL_DISCOVERY_PROMPT_PATH}</span>
+              <span>Source of truth: docs index -> model discovery prompt</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            <CopyButton text={MODEL_DISCOVERY_PROMPT} label="复制提示词" />
+            <CopyButton text={MODEL_DISCOVERY_PROMPT_PATH} label="复制路径" />
+          </div>
+        </div>
+        <pre className="mt-5 max-h-72 overflow-auto rounded-lg border border-border/60 bg-background/70 p-4 text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap">
+          {MODEL_DISCOVERY_PROMPT}
+        </pre>
+      </Card>
 
       <Card>
         <SectionTitle>原生端点范围</SectionTitle>
