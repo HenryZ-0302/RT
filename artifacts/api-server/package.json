@@ -7,8 +7,9 @@
     "dev": "fuser -k 8080/tcp 2>/dev/null || true && export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "probe:models": "node ./scripts/probe-replit-models.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm run build && node --test tests/smoke.test.mjs"
+    "test": "pnpm run build && node --test --test-isolation=none tests/smoke.test.mjs tests/model-probe.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

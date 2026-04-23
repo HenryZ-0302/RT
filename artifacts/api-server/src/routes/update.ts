@@ -82,6 +82,8 @@ function checkApiKey(req: Request, res: Response): boolean {
 
 const BUNDLE_INCLUDE_DIRS = [
   "artifacts/api-server/src",
+  "artifacts/api-server/scripts",
+  "artifacts/api-server/config",
   "artifacts/api-portal/src",
   "artifacts/api-portal/public",
 ];
@@ -105,6 +107,7 @@ const BUNDLE_INCLUDE_FILES = [
   "README.md",
   "AGENTS.md",
   "INSTALL.md",
+  "MODEL_PROBING.md",
 ];
 
 const BUNDLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml", ".svg"]);
