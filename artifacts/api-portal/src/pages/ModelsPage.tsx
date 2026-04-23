@@ -352,6 +352,9 @@ export function ModelsPage({
             <span className="ml-2 pr-1 hidden sm:inline">· 当前页面完全根据后端返回的模型列表渲染</span>
           </div>
           <div className="text-xs text-muted-foreground mt-2 ml-3.5">
+            当前可见模型来自后端注册表，不是平台自动发现的全量模型目录。
+          </div>
+          <div className="text-xs text-muted-foreground mt-2 ml-3.5">
             OpenRouter 模型默认关闭，需要时再手动开启。
           </div>
         </div>

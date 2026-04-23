@@ -26,8 +26,9 @@ Full instructions live in [docs/INSTALL.md](/C:/Users/z6798/Documents/Codex/RT/d
 
 ## Docs
 
+- [Docs Index](/C:/Users/z6798/Documents/Codex/RT/docs/INDEX.md)
 - [Installation Guide](/C:/Users/z6798/Documents/Codex/RT/docs/INSTALL.md)
-- [Model Probing Guide](/C:/Users/z6798/Documents/Codex/RT/docs/MODEL_PROBING.md)
+- [Model Discovery Prompt](/C:/Users/z6798/Documents/Codex/RT/docs/MODEL_PROBING_PROMPT.md)
 
 ## Workflow Source Of Truth
 

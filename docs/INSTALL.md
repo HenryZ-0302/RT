@@ -1,6 +1,6 @@
 # RT Replit Install Guide
 
-Use this document when installing or re-initializing this repository in a Replit workspace.
+Use this document when installing, updating, or re-initializing this repository in a Replit workspace.
 
 ## Goal
 
@@ -8,6 +8,8 @@ Set up the latest repository code as a clean two-service Replit project:
 
 - `API Server`
 - `API Portal`
+
+The same workflow waiting and artifact rules apply both to first-time installs and later repository updates.
 
 ## Quick Steps
 
