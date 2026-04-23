@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { execFile } from "child_process";
+import { promisify } from "util";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,6 +14,8 @@ const REPORTS_DIR = resolve(API_SERVER_ROOT, "reports");
 const JSON_REPORT_PATH = resolve(REPORTS_DIR, "model-probe.latest.json");
 const MARKDOWN_REPORT_PATH = resolve(REPORTS_DIR, "model-probe.latest.md");
 const OPENROUTER_DIRECTORY_URL = "https://openrouter.ai/api/v1/models";
+const execFileAsync = promisify(execFile);
+const PROBE_TIMEOUT_MS = 180_000;
 
 const PROVIDERS = ["openai", "anthropic", "gemini", "openrouter"];
 const SUPPORTED_PROBE_KINDS = new Set(["chat", "image", "audio"]);
@@ -424,7 +428,90 @@ export function buildMarkdownReport({ generatedAt, configuredProviders, results,
   return `${lines.join("\n")}\n`;
 }
 
+function encodeWorkerPayload(payload) {
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+}
+
+function decodeWorkerPayload(payload) {
+  return JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+}
+
+function buildProbeErrorResult(candidate, message, checkedAt, extra = {}) {
+  return {
+    provider: candidate.provider,
+    modelId: candidate.modelId,
+    probeKind: candidate.probeKind,
+    status: "error",
+    httpStatus: null,
+    errorCode: null,
+    errorMessage: message,
+    checkedAt,
+    registered: candidate.registered,
+    sources: candidate.sources,
+    ...extra,
+  };
+}
+
+async function probeCandidateIsolated(candidate, runtimes) {
+  const checkedAt = new Date().toISOString();
+  const runtime = runtimes[candidate.provider];
+  if (!runtime?.configured) {
+    return buildProbeErrorResult(candidate, `Missing ${PROVIDER_ENV[candidate.provider].apiKey} or ${PROVIDER_ENV[candidate.provider].baseUrl}.`, checkedAt, {
+      status: "unconfigured",
+      errorMessage: `Missing ${PROVIDER_ENV[candidate.provider].apiKey} or ${PROVIDER_ENV[candidate.provider].baseUrl}.`,
+    });
+  }
+
+  const payload = encodeWorkerPayload({ candidate });
+  try {
+    const { stdout, stderr } = await execFileAsync(process.execPath, [__filename, "--worker", payload], {
+      cwd: WORKSPACE_ROOT,
+      env: process.env,
+      timeout: PROBE_TIMEOUT_MS,
+      maxBuffer: 1024 * 1024 * 4,
+      windowsHide: true,
+    });
+    const output = stdout.trim();
+    if (!output) {
+      return buildProbeErrorResult(candidate, stderr.trim() ? `Worker produced no JSON. stderr: ${stderr.trim()}` : "Worker produced no JSON output.", checkedAt);
+    }
+    try {
+      return JSON.parse(output);
+    } catch (error) {
+      const parseMessage = error instanceof Error ? error.message : String(error);
+      return buildProbeErrorResult(candidate, `Worker returned invalid JSON: ${parseMessage}${stderr.trim() ? ` | stderr: ${stderr.trim()}` : ""}`, checkedAt);
+    }
+  } catch (error) {
+    const details = extractErrorDetails(error);
+    const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+    const message = stderr || details.errorMessage || "Probe worker failed";
+    return buildProbeErrorResult(candidate, message, checkedAt, {
+      httpStatus: details.httpStatus,
+      errorCode: details.errorCode,
+    });
+  }
+}
+
+async function runWorkerMode() {
+  const encoded = process.argv[3];
+  if (!encoded) throw new Error("Missing worker payload.");
+  const { candidate } = decodeWorkerPayload(encoded);
+  const runtimes = Object.fromEntries(PROVIDERS.map((provider) => {
+    const envConfig = PROVIDER_ENV[provider];
+    const apiKey = process.env[envConfig.apiKey]?.trim() ?? "";
+    const baseUrl = process.env[envConfig.baseUrl]?.trim() ?? "";
+    return [provider, {
+      apiKey,
+      baseUrl,
+      configured: Boolean(apiKey && baseUrl),
+    }];
+  }));
+  const result = await probeCandidate(candidate, runtimes);
+  process.stdout.write(JSON.stringify(result));
+}
+
 async function main() {
+  console.log("[probe:models] starting model probe run");
   const registeredCandidates = await loadRegisteredCandidates();
   const supplementalCandidates = await loadSupplementalCandidates();
   const notes = [];
@@ -438,6 +525,7 @@ async function main() {
   }
 
   const candidates = mergeCandidateSets(registeredCandidates, supplementalCandidates, openRouterDirectoryCandidates);
+  console.log(`[probe:models] candidate count: ${candidates.length}`);
   const runtimes = Object.fromEntries(PROVIDERS.map((provider) => {
     const envConfig = PROVIDER_ENV[provider];
     const apiKey = process.env[envConfig.apiKey]?.trim() ?? "";
@@ -449,7 +537,16 @@ async function main() {
     }];
   }));
 
-  const results = await runWithConcurrency(candidates, 4, (candidate) => probeCandidate(candidate, runtimes));
+  console.log(`[probe:models] configured providers: ${PROVIDERS.filter((provider) => runtimes[provider].configured).join(", ") || "none"}`);
+  let completed = 0;
+  const results = await runWithConcurrency(candidates, 4, async (candidate) => {
+    const result = await probeCandidateIsolated(candidate, runtimes);
+    completed++;
+    if (completed === 1 || completed % 10 === 0 || completed === candidates.length) {
+      console.log(`[probe:models] progress ${completed}/${candidates.length}`);
+    }
+    return result;
+  });
   const generatedAt = new Date().toISOString();
   const configuredProviders = PROVIDERS.filter((provider) => runtimes[provider].configured);
   const providerStats = buildProviderStats(results);
@@ -476,7 +573,26 @@ async function main() {
   console.log(`Model probe complete. Markdown: ${MARKDOWN_REPORT_PATH}`);
 }
 
-if (process.argv[1] === __filename) {
+process.on("exit", (code) => {
+  if (process.argv[2] !== "--worker") {
+    console.log(`[probe:models] process exit ${code}`);
+  }
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("[probe:models] unhandledRejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[probe:models] uncaughtException:", error);
+});
+
+if (process.argv[2] === "--worker") {
+  runWorkerMode().catch((error) => {
+    console.error("[probe:models:worker] failed:", error instanceof Error ? error.stack ?? error.message : error);
+    process.exitCode = 1;
+  });
+} else if (resolve(process.argv[1] ?? "") === __filename) {
   main().catch((error) => {
     console.error("[probe:models] failed:", error instanceof Error ? error.stack ?? error.message : error);
     process.exitCode = 1;

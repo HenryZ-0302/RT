@@ -33,7 +33,7 @@ Full instructions live in [docs/INSTALL.md](/C:/Users/z6798/Documents/Codex/RT/d
 
 The preferred source of truth is the repository's `.replit-artifact/artifact.toml` files.
 
-If Replit cannot register or auto-generate workflows from those artifacts in the current platform flow, create the fallback workflows directly from the matching `artifact.toml` `[[services]]` definitions without changing names, commands, ports, paths, or env assumptions.
+Do not manually create fallback workflows. If Replit does not show the artifact-generated workflows immediately, refresh and re-check the platform state first, then resolve duplicates in favor of the system-generated workflows.
 
 ## Native Endpoint Scope
 

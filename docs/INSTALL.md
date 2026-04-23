@@ -17,17 +17,17 @@ Set up the latest repository code as a clean two-service Replit project:
    - Delete all folders inside the existing `artifacts` directory before replacing them with repository contents.
 2. Run `pnpm install`.
 3. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
-4. If Replit recognizes repository artifacts, register the missing artifacts first and let the platform auto-generate workflows from `[[services]]`.
-5. If the current Replit platform flow cannot register or auto-generate workflows from repository artifacts, use the matching repository `artifact.toml` `[[services]]` entries themselves as the fallback source of truth.
-6. Start or restart the two workflows:
+4. Register missing repository artifacts only through Replit's artifact registration flow when the platform exposes that flow.
+5. Wait for Replit to auto-generate workflows from the repository `artifact.toml` `[[services]]` definitions, then refresh and check again before taking any further workflow action.
+6. Start or restart the two system-generated workflows:
    - `API Server`
    - `API Portal`
 
 ## Workflow Rules
 
 - Prefer artifact registration first, then let Replit auto-generate workflows from `[[services]]`.
-- Do not manually create workflows unless Replit cannot register or auto-generate them from the repository artifact configuration.
-- In that fallback case, create workflows only from the corresponding repository `artifact.toml` `[[services]]` definitions without changing names, commands, ports, paths, or env values.
+- Do not manually create workflows with `configureWorkflow()` or any equivalent manual workflow creation step.
+- If workflows do not appear immediately, re-check the platform state after artifact registration or workspace refresh instead of creating manual duplicates.
 - If duplicate workflows already exist, stop and report them instead of creating any new workflow.
 - Do not manually copy or invent placeholder artifact IDs.
 
