@@ -84,6 +84,7 @@ const BUNDLE_INCLUDE_DIRS = [
   "artifacts/api-server/src",
   "artifacts/api-server/scripts",
   "artifacts/api-server/config",
+  "docs",
   "artifacts/api-portal/src",
   "artifacts/api-portal/public",
 ];
@@ -106,8 +107,6 @@ const BUNDLE_INCLUDE_FILES = [
   "tsconfig.base.json",
   "README.md",
   "AGENTS.md",
-  "INSTALL.md",
-  "MODEL_PROBING.md",
 ];
 
 const BUNDLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".css", ".html", ".md", ".yaml", ".yml", ".svg"]);

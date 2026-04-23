@@ -1,29 +1,47 @@
-# Unified Service Layer
+# RT
 
-This branch keeps the project in a minimal workspace layout while preserving the two runnable apps under `artifacts/`:
+RT is a Replit-first two-service workspace:
 
 - `artifacts/api-server`
 - `artifacts/api-portal`
 
-The root files in this branch are intentionally reduced to the minimum set needed for workspace installs, TypeScript config inheritance, version metadata, and basic project onboarding.
+The server provides unified AI proxying, management routes, model controls, update support, and usage stats.
+The portal provides the self-hosted control panel for setup, status, models, routing, logs, chat, and docs.
 
-## Included Root Files
+## Quick Start
 
-- `package.json`
-- `pnpm-workspace.yaml`
-- `tsconfig.base.json`
-- `tsconfig.json`
-- `version.json`
+For a fresh Replit install or re-initialization:
 
-## Notes
+1. Sync the repository files into the workspace.
+2. Run `pnpm install`.
+3. Start:
+   - `API Server`
+   - `API Portal`
+4. Verify:
+   - server listens on `8080`
+   - portal serves on `3000`
+   - `/api/service/status` returns `200`
 
-- The server exposes compatibility and management routes from `artifacts/api-server`.
-- The portal UI is served from `artifacts/api-portal`.
-- `version.json` is required by both the server and portal for version display and update metadata.
+Full instructions live in [docs/INSTALL.md](/C:/Users/z6798/Documents/Codex/RT/docs/INSTALL.md).
+
+## Docs
+
+- [Installation Guide](/C:/Users/z6798/Documents/Codex/RT/docs/INSTALL.md)
+- [Model Probing Guide](/C:/Users/z6798/Documents/Codex/RT/docs/MODEL_PROBING.md)
+
+## Workflow Source Of Truth
+
+The preferred source of truth is the repository's `.replit-artifact/artifact.toml` files.
+
+If Replit cannot register or auto-generate workflows from those artifacts in the current platform flow, create the fallback workflows directly from the matching `artifact.toml` `[[services]]` definitions without changing names, commands, ports, paths, or env assumptions.
 
 ## Native Endpoint Scope
 
-- Recommended OpenAI-compatible entrypoint: `/api/v1` (for example `GET /api/v1/models`, `POST /api/v1/chat/completions`, `POST /api/v1/images/generations`).
-- Claude native compatibility currently covers `POST /api/v1/messages` only.
-- Gemini native compatibility currently covers `GET /api/v1beta/models`, `GET /api/v1beta/models/:model`, and `POST /api/v1beta/models/:model:generateImages`.
-- Native compatibility in this project is intentionally partial. It supports common request formats and selected endpoints, but it is not a full provider-by-provider API mirror.
+- Recommended OpenAI-compatible entrypoint: `/api/v1`
+- Claude native compatibility currently covers `POST /api/v1/messages`
+- Gemini native compatibility currently covers:
+  - `GET /api/v1beta/models`
+  - `GET /api/v1beta/models/:model`
+  - `POST /api/v1beta/models/:model:generateImages`
+
+Native compatibility is intentionally partial. It supports the common flows this project needs, not a full provider-by-provider mirror.

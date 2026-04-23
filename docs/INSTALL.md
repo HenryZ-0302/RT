@@ -1,31 +1,33 @@
-# RT Replit Install Instructions
+# RT Replit Install Guide
 
-Use this document only when installing or re-initializing this repository in a Replit workspace.
+Use this document when installing or re-initializing this repository in a Replit workspace.
 
-## Install Goal
+## Goal
 
 Set up the latest repository code as a clean two-service Replit project:
 
 - `API Server`
 - `API Portal`
 
-## Install Steps
+## Quick Steps
 
 1. Replace the current business files with the latest repository contents.
    - Keep Replit local configuration and platform-generated files unchanged.
    - Delete all other files and folders not included in the repository.
    - Delete all folders inside the existing `artifacts` directory before replacing them with repository contents.
 2. Run `pnpm install`.
-3. Use the repository's `.replit-artifact/artifact.toml` files as the only source of truth for artifacts and workflows.
-4. If Replit does not recognize a repository artifact automatically, register that missing artifact through Replit's artifact registration flow.
-5. Start or restart the two system-generated workflows from artifact configuration:
+3. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
+4. If Replit recognizes repository artifacts, register the missing artifacts first and let the platform auto-generate workflows from `[[services]]`.
+5. If the current Replit platform flow cannot register or auto-generate workflows from repository artifacts, use the matching repository `artifact.toml` `[[services]]` entries themselves as the fallback source of truth.
+6. Start or restart the two workflows:
    - `API Server`
    - `API Portal`
 
 ## Workflow Rules
 
-- Never manually create workflows with `configureWorkflow()` or any equivalent manual workflow creation step.
-- First register missing artifacts, then let Replit auto-generate workflows from `[[services]]`, then start or restart those generated workflows.
+- Prefer artifact registration first, then let Replit auto-generate workflows from `[[services]]`.
+- Do not manually create workflows unless Replit cannot register or auto-generate them from the repository artifact configuration.
+- In that fallback case, create workflows only from the corresponding repository `artifact.toml` `[[services]]` definitions without changing names, commands, ports, paths, or env values.
 - If duplicate workflows already exist, stop and report them instead of creating any new workflow.
 - Do not manually copy or invent placeholder artifact IDs.
 
