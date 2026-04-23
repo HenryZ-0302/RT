@@ -18,8 +18,15 @@ Set up the latest repository code as a clean two-service Replit project:
 2. Run `pnpm install`.
 3. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
 4. Register missing repository artifacts only through Replit's artifact registration flow when the platform exposes that flow.
-5. Wait for Replit to auto-generate workflows from the repository `artifact.toml` `[[services]]` definitions, then refresh and check again before taking any further workflow action.
-6. Start or restart the two system-generated workflows:
+5. After copying the repository files and running `pnpm install`, wait for Replit to auto-scan the repository `.replit-artifact/artifact.toml` files and auto-generate workflows from the `[[services]]` definitions.
+6. Poll the platform state before doing anything workflow-related:
+   - re-check every 5 seconds
+   - wait up to 90 seconds total
+   - do not manually create fallback workflows during this wait window
+7. If the two artifact-backed workflows appear within that 90 second window, use those system-generated workflows directly.
+8. If the workflows still do not appear after 90 seconds, stop and report the exact state to the user instead of creating manual duplicates.
+9. If duplicate workflows already exist because system workflows appeared after an earlier manual attempt, keep the system-generated workflows and remove the manual duplicates.
+10. Start or restart the two system-generated workflows:
    - `API Server`
    - `API Portal`
 
@@ -27,9 +34,11 @@ Set up the latest repository code as a clean two-service Replit project:
 
 - Prefer artifact registration first, then let Replit auto-generate workflows from `[[services]]`.
 - Do not manually create workflows with `configureWorkflow()` or any equivalent manual workflow creation step.
-- If workflows do not appear immediately, re-check the platform state after artifact registration or workspace refresh instead of creating manual duplicates.
-- If duplicate workflows already exist, stop and report them instead of creating any new workflow.
+- Treat artifact auto-registration as asynchronous. A missing workflow immediately after file sync does not mean registration failed.
+- If workflows do not appear immediately, keep polling and refreshing the platform state instead of creating manual duplicates.
+- If duplicate workflows already exist, resolve them in favor of the system-generated workflows from repository artifacts.
 - Do not manually copy or invent placeholder artifact IDs.
+- If a separate long-running helper task is needed during setup, use one clearly named temporary workflow, remove it immediately after the task finishes, and mention that cleanup in the final report.
 
 ## Expected Ports
 
