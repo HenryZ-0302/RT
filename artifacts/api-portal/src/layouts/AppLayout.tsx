@@ -64,7 +64,7 @@ const PAGE_BADGES: Record<string, string> = {
 };
 
 export function AppLayout({ children, isSetup }: { children: React.ReactNode, isSetup?: boolean }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const [location] = useLocation();

@@ -52,10 +52,8 @@ function formatCheckTime(value: string | null): string {
 
 export function DashboardPage({
   baseUrl,
-  displayUrl,
 }: {
   baseUrl: string;
-  displayUrl: string;
 }) {
   const [versionInfo, setVersionInfo] = useState<PortalVersionInfo>(FALLBACK_VERSION_INFO);
   const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>("checking");
@@ -72,14 +70,14 @@ export function DashboardPage({
   const loadVersionInfo = useCallback(async () => {
     setUpdateChecking(true);
     try {
-      const data = await fetchPortalVersionInfo(displayUrl);
+      const data = await fetchPortalVersionInfo(baseUrl);
       setVersionInfo(data);
     } catch {
       // Keep fallback version info.
     } finally {
       setUpdateChecking(false);
     }
-  }, [displayUrl]);
+  }, [baseUrl]);
 
   useEffect(() => {
     void loadVersionInfo();
@@ -164,25 +162,17 @@ export function DashboardPage({
           <div className="space-y-3">
             <div className="inline-flex items-center rounded-full border border-primary/15 bg-white/75 dark:bg-slate-900/55 px-3 py-1.5 text-[11px] font-bold tracking-[0.28em] uppercase text-primary/80">控制台总览</div>
             <div>
-              <div className="flex flex-wrap items-center gap-3 mb-2">
+              <div className="mb-2">
                 <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">{greeting.title}</h1>
-                <span className={cn("text-[11px] px-3 py-1.5 rounded-full border font-medium whitespace-nowrap", statusPillClassName)}>
-                  {statusLabel}
-                </span>
               </div>
               <p className="text-base text-muted-foreground leading-relaxed">{greeting.subtitle}</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 min-w-[240px]">
+          <div className="min-w-[240px]">
             <div className="rounded-xl border border-border/50 bg-background/70 p-4">
               <div className="text-xs text-muted-foreground mb-1">当前时间</div>
               <div className="text-3xl font-bold font-mono tracking-tight">{timeText}</div>
               <div className="text-xs text-muted-foreground mt-2">{dateText}</div>
-            </div>
-            <div className="rounded-xl border border-border/50 bg-background/70 p-4">
-              <div className="text-xs text-muted-foreground mb-1">当前版本</div>
-              <div className="text-2xl font-bold font-mono tracking-tight">v{versionInfo.version}</div>
-              <div className="text-xs text-muted-foreground mt-2">{versionDateText}</div>
             </div>
           </div>
         </div>
@@ -204,14 +194,10 @@ export function DashboardPage({
               {statusLabel}
             </span>
           </div>
-          <div className="mt-5 grid grid-cols-2 gap-3">
+          <div className="mt-5">
             <div className="rounded-xl border border-border/50 bg-background/70 p-4">
               <div className="text-xs text-muted-foreground">最近检查</div>
               <div className="mt-2 text-lg font-mono font-bold tracking-tight">{checkedAtText}</div>
-            </div>
-            <div className="rounded-xl border border-border/50 bg-background/70 p-4">
-              <div className="text-xs text-muted-foreground">服务地址</div>
-              <div className="mt-2 truncate text-sm font-mono text-foreground">{displayUrl}</div>
             </div>
           </div>
         </Card>

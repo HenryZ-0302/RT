@@ -15,6 +15,7 @@ export type RegisteredModel = {
 };
 
 export const OPENAI_CHAT_MODELS = [
+  "gpt-5.4",
   "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano",
   "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
   "gpt-4o", "gpt-4o-mini",
@@ -69,11 +70,50 @@ const OPENROUTER_FEATURED = [
   "x-ai/grok-4.20", "x-ai/grok-4.1-fast", "x-ai/grok-4-fast",
   "x-ai/grok-4.20-multi-agent", "x-ai/grok-code-fast-1",
   "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
-  "deepseek/deepseek-v3.2", "deepseek/deepseek-r1", "deepseek/deepseek-r1-0528",
+  "deepseek/deepseek-v3.2", "deepseek/deepseek-v3.2-speciale", "deepseek/deepseek-v3.2-exp",
+  "deepseek/deepseek-r1", "deepseek/deepseek-r1-0528",
   "mistralai/mistral-small-2603", "qwen/qwen3.5-122b-a10b", "qwen/qwen3-coder-next",
+  "qwen/qwen3-max", "qwen/qwen3-235b-a22b", "qwen/qwen3-coder", "qwen/qwen3-coder-plus",
+  "z-ai/glm-4.6", "moonshotai/kimi-k2",
   "google/gemini-2.5-pro", "google/gemini-3.1-pro-preview",
   "anthropic/claude-opus-4.6", "anthropic/claude-opus-4.7",
   "cohere/command-a", "amazon/nova-premier-v1", "baidu/ernie-4.5-300b-a47b",
+  "x-ai/grok-3-beta",
+  "anthropic/claude-3.7-sonnet", "anthropic/claude-haiku-4.5",
+  "anthropic/claude-opus-4.6-fast", "anthropic/claude-sonnet-4.5",
+  "google/gemini-2.5-flash-image", "google/gemini-2.5-flash-lite-preview-09-2025",
+  "google/gemini-2.0-flash-001", "google/gemini-2.0-flash-lite-001",
+  "google/gemma-3-27b-it", "google/gemma-3-12b-it", "google/gemma-3-4b-it",
+  "google/gemma-4-31b-it", "google/gemma-4-26b-a4b-it",
+  "deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-v3.1-terminus",
+  "qwen/qwen-max", "qwen/qwen-plus", "qwen/qwen-plus-2025-07-28", "qwen/qwen-turbo",
+  "qwen/qwen-vl-max", "qwen/qwen-vl-plus", "qwen/qwen2.5-vl-72b-instruct",
+  "qwen/qwen3-coder-flash",
+  "qwen/qwen3-next-80b-a3b-instruct", "qwen/qwen3-next-80b-a3b-thinking",
+  "qwen/qwen3-vl-235b-a22b-instruct", "qwen/qwen3-vl-235b-a22b-thinking",
+  "qwen/qwen3-vl-30b-a3b-instruct", "qwen/qwen3-vl-30b-a3b-thinking",
+  "qwen/qwen3-vl-32b-instruct",
+  "qwen/qwen3-vl-8b-instruct", "qwen/qwen3-vl-8b-thinking",
+  "qwen/qwen3.5-9b", "qwen/qwen3.6-plus", "qwen/qwq-32b",
+  "z-ai/glm-5.1", "z-ai/glm-5-turbo", "z-ai/glm-5v-turbo",
+  "moonshotai/kimi-k2-0905", "moonshotai/kimi-k2.6",
+  "mistralai/mistral-saba", "mistralai/mistral-small-3.1-24b-instruct",
+  "minimax/minimax-m2", "minimax/minimax-m2.7",
+  "xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5",
+  "xiaomi/mimo-v2-pro", "xiaomi/mimo-v2-omni",
+  "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+  "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-nano-9b-v2",
+  "perplexity/sonar-pro", "perplexity/sonar-deep-research", "perplexity/sonar-reasoning-pro",
+  "openai/gpt-4o-search-preview", "openai/gpt-4o-mini-search-preview",
+  "aion-labs/aion-1.0", "aion-labs/aion-1.0-mini", "aion-labs/aion-rp-llama-3.1-8b",
+  "alibaba/tongyi-deepresearch-30b-a3b",
+  "arcee-ai/trinity-large-thinking",
+  "bytedance-seed/seed-2.0-lite",
+  "ibm-granite/granite-4.0-h-micro",
+  "kwaipilot/kat-coder-pro-v2",
+  "openrouter/pareto-code",
+  "rekaai/reka-edge", "rekaai/reka-flash-3",
+  "thedrummer/cydonia-24b-v4.1", "thedrummer/skyfall-36b-v2",
 ];
 
 export const REGISTERED_MODELS: RegisteredModel[] = [
@@ -160,8 +200,9 @@ export const ALL_MODELS = REGISTERED_MODELS.map((model) => ({ id: model.id, desc
 
 const CHAT_MODEL_IDS = new Set(REGISTERED_MODELS.filter((model) => model.capability === "chat").map((model) => model.id));
 const IMAGE_MODEL_IDS = new Set(REGISTERED_MODELS.filter((model) => model.capability === "image").map((model) => model.id));
+const DEFAULT_DISABLED_MODELS = new Set<string>(OPENROUTER_FEATURED);
 
-let disabledModels: Set<string> = new Set<string>();
+let disabledModels: Set<string> = new Set<string>(DEFAULT_DISABLED_MODELS);
 
 function saveDisabledModels(set: Set<string>): void {
   writeJson("disabled_models.json", [...set]).catch((err) => {

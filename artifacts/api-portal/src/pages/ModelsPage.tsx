@@ -351,6 +351,9 @@ export function ModelsPage({
             已开启 <span className="font-bold text-primary px-1">{totalEnabled}</span> / {totalCount}
             <span className="ml-2 pr-1 hidden sm:inline">· 当前页面完全根据后端返回的模型列表渲染</span>
           </div>
+          <div className="text-xs text-muted-foreground mt-2 ml-3.5">
+            OpenRouter 模型默认关闭，需要时再手动开启。
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -413,6 +416,7 @@ export function ModelsPage({
               const groupEnabled = summaryState.enabled > 0;
               const allEnabled = summaryState.enabled === summaryState.total;
               const providerLabel = getProviderLabel(group.provider);
+              const isOpenRouterGroup = group.provider === "openrouter";
 
               const filteredModels = group.models.filter((model) => {
                 const matchesSearch = [
@@ -447,6 +451,11 @@ export function ModelsPage({
                     <div className={cn("w-2 h-2 rounded-full hidden sm:block", colors.dot)} />
                     <h3 className={cn("font-bold text-[15px] mr-auto flex items-center gap-2", colors.text)}>
                       {group.title}
+                      {isOpenRouterGroup && (
+                        <span className="text-[10px] font-semibold border rounded px-1.5 py-0.5 text-amber-600 bg-amber-500/10 border-amber-500/20">
+                          默认关闭
+                        </span>
+                      )}
                     </h3>
 
                     <div

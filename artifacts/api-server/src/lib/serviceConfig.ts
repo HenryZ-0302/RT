@@ -64,8 +64,8 @@ export function getUpstreamRepoConfig(): RepoConfig {
 }
 
 export function getUpstreamRepoUrl(): string {
-  const { owner, repo } = getUpstreamRepoConfig();
-  return `https://github.com/${owner}/${repo}`;
+  const { owner, repo, branch } = getUpstreamRepoConfig();
+  return `https://github.com/${owner}/${repo}/tree/${branch}`;
 }
 
 export function getUpstreamRawVersionUrl(): string {

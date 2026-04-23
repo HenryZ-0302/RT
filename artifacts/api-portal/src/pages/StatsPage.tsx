@@ -29,6 +29,7 @@ type ModelCostBreakdown = {
 };
 
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  "gpt-5.4": { input: 2, output: 16 },
   "gpt-5.2": { input: 1.75, output: 14 },
   "gpt-5.1": { input: 1.25, output: 10 },
   "gpt-5": { input: 1.25, output: 10 },
@@ -238,6 +239,11 @@ export function StatsPage({
     totalStreamCalls: acc.totalStreamCalls + (s.streamingCalls ?? 0),
   }), { calls: 0, errors: 0, streamingCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, totalDuration: 0, totalTtft: 0, totalStreamCalls: 0 }) : null;
 
+  const successfulCalls = totals ? Math.max(0, totals.calls - totals.errors) : 0;
+  const successRate = totals && totals.calls > 0
+    ? Math.max(0, Math.min(1, successfulCalls / totals.calls))
+    : null;
+
   useEffect(() => {
     if (!apiKey) return;
     onRefresh();
@@ -339,16 +345,16 @@ export function StatsPage({
                       className="stroke-blue-500 fill-none"
                       strokeWidth="6"
                       strokeLinecap="round"
-                      strokeDasharray={`${((totals!.calls - totals!.errors) / totals!.calls) * 150.7} 150.7`}
+                      strokeDasharray={`${(successRate ?? 0) * 150.7} 150.7`}
                     />
                   )}
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-foreground">
-                  {totals!.calls > 0 ? `${Math.round(((totals!.calls - totals!.errors) / totals!.calls) * 100)}%` : "--"}
+                  {successRate !== null ? `${Math.round(successRate * 100)}%` : "--"}
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-2 h-2 rounded-full bg-blue-500" />成功 <span className="font-bold text-foreground ml-auto">{totals!.calls - totals!.errors}</span></div>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-2 h-2 rounded-full bg-blue-500" />成功 <span className="font-bold text-foreground ml-auto">{successfulCalls}</span></div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground"><div className="w-2 h-2 rounded-full bg-destructive" />失败 <span className="font-bold text-foreground ml-auto">{totals!.errors}</span></div>
               </div>
             </div>

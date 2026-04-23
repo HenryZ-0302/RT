@@ -449,7 +449,6 @@ export default function App() {
             <Route path="/">
               <DashboardPage
                 baseUrl={baseUrl}
-                displayUrl={displayUrl}
               />
             </Route>
             <Route path="/chat">
