@@ -5,7 +5,8 @@
   "license": "MIT",
   "scripts": {
     "build": "pnpm -r --if-present run build",
-    "typecheck": "pnpm -r --if-present run typecheck"
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "verify:install": "node scripts/verify-install.mjs"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

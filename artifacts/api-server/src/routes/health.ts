@@ -40,6 +40,7 @@ function sendBootstrap(_req: Request, res: Response) {
 }
 
 router.get("/service/status", sendHealth);
+router.get("/healthz", sendHealth);
 router.get("/service/healthcheck", sendHealthcheck);
 router.get("/service/bootstrap", sendBootstrap);
 

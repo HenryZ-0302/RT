@@ -18,17 +18,18 @@ The same workflow waiting and artifact rules apply both to first-time installs a
    - Delete all other files and folders not included in the repository.
    - Delete all folders inside the existing `artifacts` directory before replacing them with repository contents.
 2. Run `pnpm install`.
-3. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
-4. Register missing repository artifacts only through Replit's artifact registration flow when the platform exposes that flow.
-5. After copying the repository files and running `pnpm install`, wait for Replit to auto-scan the repository `.replit-artifact/artifact.toml` files and auto-generate workflows from the `[[services]]` definitions.
-6. Poll the platform state before doing anything workflow-related:
+3. Run `pnpm run verify:install` to confirm the repository-level install checklist before workflow startup.
+4. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
+5. Register missing repository artifacts only through Replit's artifact registration flow when the platform exposes that flow.
+6. After copying the repository files and running `pnpm install`, wait for Replit to auto-scan the repository `.replit-artifact/artifact.toml` files and auto-generate workflows from the `[[services]]` definitions.
+7. Poll the platform state before doing anything workflow-related:
    - re-check every 5 seconds
-   - wait up to 90 seconds total
+   - wait up to 180 seconds total
    - do not manually create fallback workflows during this wait window
-7. If the two artifact-backed workflows appear within that 90 second window, use those system-generated workflows directly.
-8. If the workflows still do not appear after 90 seconds, stop and report the exact state to the user instead of creating manual duplicates.
-9. If duplicate workflows already exist because system workflows appeared after an earlier manual attempt, keep the system-generated workflows and remove the manual duplicates.
-10. Start or restart the two system-generated workflows:
+8. If the two artifact-backed workflows appear within that 180 second window, use those system-generated workflows directly.
+9. If the files are in place but the workflows still do not appear after 180 seconds, stop and report the exact state to the user instead of creating manual duplicates. The user may choose to wait one more scan cycle.
+10. If duplicate workflows already exist because system workflows appeared after an earlier manual attempt, keep the system-generated workflows and remove the manual duplicates.
+11. Start or restart the two system-generated workflows:
    - `API Server`
    - `API Portal`
 
@@ -55,14 +56,15 @@ After installation:
    - `Server listening`
    - `port: 8080`
 2. Confirm `/api/service/status` returns `200`.
-3. Confirm the frontend page opens successfully.
-4. Ignore the known `/api/service/settings/compatibility` `500` log.
+3. Confirm `/api/healthz` returns `200`.
+4. Confirm the frontend page opens successfully.
+5. Ignore the known `/api/service/settings/compatibility` `500` log.
 
 ## Reporting Rules
 
 - Do not use `rsync`.
-- Report every issue immediately, including small issues, warnings, retries, temporary failures, and non-blocking problems.
-- If an error occurs during setup, dependency installation, artifact registration, duplicate workflow detection, or workflow startup, stop immediately.
+- Stop and wait for approval on blocking issues: `pnpm install` failure, artifact registration failure, duplicate workflow uncertainty, port conflict, build failure, or workflow startup failure.
+- Do not stop on non-blocking warnings: deprecation warnings, bundle-size warnings, transient retries that recover, or the known `/api/service/settings/compatibility` `500` log. Summarize these in the final report instead.
 - Do not edit files to fix errors without approval.
 - Report the exact error, explain the proposed fix, and wait for approval before making changes.
 

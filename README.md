@@ -22,13 +22,13 @@ For a fresh Replit install or re-initialization:
    - portal serves on `3000`
    - `/api/service/status` returns `200`
 
-Full instructions live in [docs/INSTALL.md](/C:/Users/z6798/Documents/Codex/RT/docs/INSTALL.md).
+Full instructions live in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Docs
 
-- [Docs Index](/C:/Users/z6798/Documents/Codex/RT/docs/INDEX.md)
-- [Installation Guide](/C:/Users/z6798/Documents/Codex/RT/docs/INSTALL.md)
-- [Model Discovery Prompt](/C:/Users/z6798/Documents/Codex/RT/docs/MODEL_PROBING_PROMPT.md)
+- [Docs Index](docs/INDEX.md)
+- [Installation Guide](docs/INSTALL.md)
+- [Model Discovery Prompt](docs/MODEL_PROBING_PROMPT.md)
 
 ## Workflow Source Of Truth
 

@@ -4,10 +4,10 @@ Use this folder as the single documentation entrypoint for operational tasks in 
 
 ## Documents
 
-- [INSTALL.md](/C:/Users/z6798/Documents/Codex/RT/docs/INSTALL.md)
+- [INSTALL.md](INSTALL.md)
   - Replit installation and re-initialization flow
   - artifact registration and workflow waiting rules
-- [MODEL_PROBING_PROMPT.md](/C:/Users/z6798/Documents/Codex/RT/docs/MODEL_PROBING_PROMPT.md)
+- [MODEL_PROBING_PROMPT.md](MODEL_PROBING_PROMPT.md)
   - prompt to give an Agent when you want it to discover currently usable Replit AI Integrations models
 
 ## Source Of Truth
