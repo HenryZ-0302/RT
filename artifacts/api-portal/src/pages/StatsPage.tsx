@@ -50,7 +50,6 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
   "claude-sonnet-4-5": { input: 3, output: 15 },
   "claude-sonnet-4-6": { input: 3, output: 15 },
   "claude-haiku-4-5": { input: 1, output: 5 },
-  "gemini-3-pro-preview": { input: 2, output: 12, longContextInput: 4, longContextOutput: 18, longContextThreshold: 200_000 },
   "gemini-3.1-pro-preview": { input: 2, output: 12, longContextInput: 4, longContextOutput: 18, longContextThreshold: 200_000 },
   "gemini-3-flash-preview": { input: 0.5, output: 3 },
   "gemini-2.5-pro": { input: 1.25, output: 10, longContextInput: 2.5, longContextOutput: 15, longContextThreshold: 200_000 },

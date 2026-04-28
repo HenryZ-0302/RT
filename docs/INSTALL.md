@@ -9,40 +9,29 @@ Set up the latest repository code as a clean two-service Replit project:
 - `API Server`
 - `API Portal`
 
-The same workflow waiting and artifact rules apply both to first-time installs and later repository updates.
+Use the same flow for first-time installs and later repository updates.
 
 ## Quick Steps
 
-1. Replace the current business files with the latest repository contents.
+1. Overlay the latest repository contents onto the workspace.
    - Keep Replit local configuration and platform-generated files unchanged.
-   - Delete all other files and folders not included in the repository.
-   - Delete all folders inside the existing `artifacts` directory before replacing them with repository contents.
+   - Do not delete existing artifact service directories before copying files. Keep `artifacts/api-server` and `artifacts/api-portal` present so Replit does not lose their artifact registrations.
+   - After copying, remove only unrelated files or folders that are clearly not in the repository and are not Replit local/platform files.
 2. Run `pnpm install`.
 3. Run `pnpm run verify:install` to confirm the repository-level install checklist before workflow startup.
-4. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
-5. Register missing repository artifacts only through Replit's artifact registration flow when the platform exposes that flow.
-   - If old artifact directories were deleted during cleanup, Replit may temporarily lose their registration records. Re-register the repository artifacts from the checked-in `.replit-artifact/artifact.toml` files instead of inventing new workflow commands.
-6. After copying the repository files and running `pnpm install`, wait for Replit to auto-scan the repository `.replit-artifact/artifact.toml` files and auto-generate workflows from the `[[services]]` definitions.
-7. Poll the platform state before doing anything workflow-related:
-   - re-check every 5 seconds
-   - wait up to 180 seconds total
-   - do not manually create fallback workflows during this wait window
-8. If the two artifact-backed workflows appear within that 180 second window, use those system-generated workflows directly.
-9. If the files are in place but the workflows still do not appear after 180 seconds, stop and report the exact state to the user instead of creating manual duplicates. The user may choose to wait one more scan cycle.
-10. If duplicate workflows already exist because system workflows appeared after an earlier manual attempt, keep the system-generated workflows and remove the manual duplicates.
-11. Start or restart the two system-generated workflows:
+4. Treat the checked-in `.replit-artifact/artifact.toml` files as the source of truth for service names, commands, and ports.
+5. Wait for Replit to recognize the artifact-backed workflows. If they are not visible immediately, refresh/re-check for up to 180 seconds.
+6. If an artifact is still missing after the wait, stop and report the exact state. Do not invent workflow commands or use `configureWorkflow()` as a fallback.
+7. Start or restart the two artifact-backed workflows:
    - `API Server`
    - `API Portal`
 
 ## Workflow Rules
 
-- Prefer artifact registration first, then let Replit auto-generate workflows from `[[services]]`.
-- Do not manually create workflows with `configureWorkflow()` or any equivalent manual workflow creation step.
-- Treat artifact auto-registration as asynchronous. A missing workflow immediately after file sync does not mean registration failed.
-- If workflows do not appear immediately, keep polling and refreshing the platform state instead of creating manual duplicates.
-- If duplicate workflows already exist, resolve them in favor of the system-generated workflows from repository artifacts.
+- Do not delete `artifacts/api-server` or `artifacts/api-portal` as a setup step; direct overlay is safer than delete-and-recreate.
+- Do not manually create workflows with `configureWorkflow()` or equivalent commands.
+- If duplicate workflows already exist, keep the artifact-backed workflows and report/remove the manual duplicates.
 - Do not manually copy or invent placeholder artifact IDs.
-- If a separate long-running helper task is needed during setup, use one clearly named temporary workflow, remove it immediately after the task finishes, and mention that cleanup in the final report.
 
 ## Expected Ports
 
