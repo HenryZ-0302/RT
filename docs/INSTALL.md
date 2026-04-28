@@ -21,6 +21,7 @@ The same workflow waiting and artifact rules apply both to first-time installs a
 3. Run `pnpm run verify:install` to confirm the repository-level install checklist before workflow startup.
 4. Use the repository's `.replit-artifact/artifact.toml` files as the primary source of truth for artifacts and workflows.
 5. Register missing repository artifacts only through Replit's artifact registration flow when the platform exposes that flow.
+   - If old artifact directories were deleted during cleanup, Replit may temporarily lose their registration records. Re-register the repository artifacts from the checked-in `.replit-artifact/artifact.toml` files instead of inventing new workflow commands.
 6. After copying the repository files and running `pnpm install`, wait for Replit to auto-scan the repository `.replit-artifact/artifact.toml` files and auto-generate workflows from the `[[services]]` definitions.
 7. Poll the platform state before doing anything workflow-related:
    - re-check every 5 seconds

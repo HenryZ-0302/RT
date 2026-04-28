@@ -168,7 +168,7 @@ export function DocsPage({ displayUrl }: { displayUrl: string }) {
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="rounded-md border border-border/60 bg-background/70 px-2 py-1 font-mono">{MODEL_DISCOVERY_PROMPT_PATH}</span>
-              <span>Source of truth: docs index -> model discovery prompt</span>
+              <span>{"Source of truth: docs index -> model discovery prompt"}</span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
