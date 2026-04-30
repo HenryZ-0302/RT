@@ -146,6 +146,16 @@ function estimateTokensFromChars(chars: number): number {
   return chars > 0 ? Math.ceil(chars / 4) : 0;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    : [];
+}
+
 function sumGeminiBillableOutputTokens(usage: {
   candidatesTokenCount?: number;
   thoughtsTokenCount?: number;
@@ -168,8 +178,9 @@ function sumGeminiBillableOutputTokens(usage: {
 }
 
 function extractGeminiTextAndReasoning(source: unknown): { text: string; reasoning: string } {
-  const candidates = (source as { candidates?: Array<{ content?: { parts?: Array<Record<string, unknown>> } }> })?.candidates;
-  const parts = candidates?.[0]?.content?.parts ?? [];
+  const candidates = asRecordArray(asRecord(source)?.["candidates"]);
+  const content = asRecord(candidates[0]?.["content"]);
+  const parts = asRecordArray(content?.["parts"]);
   const textParts: string[] = [];
   const reasoningParts: string[] = [];
 
@@ -196,7 +207,7 @@ async function fakeStreamResponse(
   const id = (json["id"] as string) ?? `chatcmpl-fake-${Date.now()}`;
   const model = (json["model"] as string) ?? "unknown";
   const created = (json["created"] as number) ?? Math.floor(Date.now() / 1000);
-  const choices = (json["choices"] as Array<Record<string, unknown>>) ?? [];
+  const choices = asRecordArray(json["choices"]);
   const usage = json["usage"] as { prompt_tokens?: number; completion_tokens?: number } | undefined;
 
   setSseHeaders(res);
@@ -208,11 +219,12 @@ async function fakeStreamResponse(
   writeAndFlush(res, `data: ${JSON.stringify(roleChunk)}\n\n`);
   const ttftMs = Date.now() - startTime;
 
-  const fullContent = (choices[0]?.["message"] as { content?: string })?.content ?? "";
-  const fullReasoning = (choices[0]?.["message"] as { reasoning?: string; reasoning_content?: string })?.reasoning_content
-    ?? (choices[0]?.["message"] as { reasoning?: string })?.reasoning
+  const message = asRecord(choices[0]?.["message"]);
+  const fullContent = typeof message?.["content"] === "string" ? message["content"] : "";
+  const fullReasoning = (typeof message?.["reasoning_content"] === "string" ? message["reasoning_content"] : undefined)
+    ?? (typeof message?.["reasoning"] === "string" ? message["reasoning"] : undefined)
     ?? "";
-  const toolCalls = (choices[0]?.["message"] as { tool_calls?: unknown[] })?.tool_calls;
+  const toolCalls = message?.["tool_calls"];
 
   if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
     const tcChunk = {

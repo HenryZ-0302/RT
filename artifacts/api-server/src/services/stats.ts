@@ -79,19 +79,25 @@ export function createStatsTracker(resolveCapability: (model: string) => ModelCa
     try {
       const saved = await readJson<Record<string, unknown>>(STATS_FILE);
       if (saved && typeof saved === "object") {
-        const backendsRaw = (saved as { backends?: Record<string, BackendStat> }).backends ?? saved as Record<string, BackendStat>;
-        const modelsRaw = (saved as { models?: Record<string, ModelStat> }).models;
+        const savedRecord = saved as Record<string, unknown>;
+        const backendsRaw = savedRecord.backends && typeof savedRecord.backends === "object"
+          ? savedRecord.backends as Record<string, unknown>
+          : savedRecord;
+        const modelsRaw = savedRecord.models && typeof savedRecord.models === "object"
+          ? savedRecord.models as Record<string, unknown>
+          : undefined;
 
         for (const [label, raw] of Object.entries(backendsRaw)) {
-          if (raw && typeof raw === "object" && "calls" in (raw as Record<string, unknown>)) {
+          if (raw && typeof raw === "object" && "calls" in raw) {
+            const item = raw as Record<string, unknown>;
             statsMap.set(label, {
-              calls: Number((raw as BackendStat).calls) || 0,
-              errors: Number((raw as BackendStat).errors) || 0,
-              promptTokens: Number((raw as BackendStat).promptTokens) || 0,
-              completionTokens: Number((raw as BackendStat).completionTokens) || 0,
-              totalDurationMs: Number((raw as BackendStat).totalDurationMs) || 0,
-              totalTtftMs: Number((raw as BackendStat).totalTtftMs) || 0,
-              streamingCalls: Number((raw as BackendStat).streamingCalls) || 0,
+              calls: Number(item.calls) || 0,
+              errors: Number(item.errors) || 0,
+              promptTokens: Number(item.promptTokens) || 0,
+              completionTokens: Number(item.completionTokens) || 0,
+              totalDurationMs: Number(item.totalDurationMs) || 0,
+              totalTtftMs: Number(item.totalTtftMs) || 0,
+              streamingCalls: Number(item.streamingCalls) || 0,
             });
           }
         }
@@ -99,11 +105,12 @@ export function createStatsTracker(resolveCapability: (model: string) => ModelCa
         if (modelsRaw && typeof modelsRaw === "object") {
           for (const [model, raw] of Object.entries(modelsRaw)) {
             if (raw && typeof raw === "object") {
+              const item = raw as Record<string, unknown>;
               modelStatsMap.set(model, {
-                calls: Number(raw.calls) || 0,
-                promptTokens: Number(raw.promptTokens) || 0,
-                completionTokens: Number(raw.completionTokens) || 0,
-                capability: raw.capability === "image" ? "image" : "chat",
+                calls: Number(item.calls) || 0,
+                promptTokens: Number(item.promptTokens) || 0,
+                completionTokens: Number(item.completionTokens) || 0,
+                capability: item.capability === "image" ? "image" : "chat",
               });
             }
           }
