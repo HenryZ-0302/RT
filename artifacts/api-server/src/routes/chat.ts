@@ -9,6 +9,7 @@ import { type RequestLog } from "../services/requestLogs";
 import { type RegisteredProvider } from "../services/modelRegistry";
 import { type FriendProxyHttpError } from "../services/routeSupport";
 import { type PromptCacheSettings } from "./settings";
+import { type CacheTokenStats } from "../services/stats";
 
 type OAIContentPart =
   | { type: "text"; text: string }
@@ -65,8 +66,7 @@ export function createChatRouter(deps: {
     tools?: OAITool[];
     toolChoice?: unknown;
     startTime: number;
-    promptCache: PromptCacheSettings;
-  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }>;
+  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }>;
   handleOpenAI: (args: {
     req: Request;
     res: Response;
@@ -78,7 +78,7 @@ export function createChatRouter(deps: {
     tools?: OAITool[];
     toolChoice?: unknown;
     startTime: number;
-  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }>;
+  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }>;
   handleGemini: (args: {
     req: Request;
     res: Response;
@@ -88,7 +88,7 @@ export function createChatRouter(deps: {
     maxTokens?: number;
     thinking?: boolean;
     startTime: number;
-  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }>;
+  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }>;
   handleClaude: (args: {
     req: Request;
     res: Response;
@@ -101,7 +101,8 @@ export function createChatRouter(deps: {
     tools?: OAITool[];
     toolChoice?: unknown;
     startTime: number;
-  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }>;
+    promptCache: PromptCacheSettings;
+  }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }>;
   isFriendProxyHttpError: (err: unknown) => err is FriendProxyHttpError;
   isHttpStatusError: (err: unknown) => err is { status: number };
   writeAndFlush: (res: Response, data: string) => void;
@@ -112,6 +113,7 @@ export function createChatRouter(deps: {
     completion: number,
     ttftMs?: number,
     model?: string,
+    cache?: CacheTokenStats,
   ) => void;
   recordErrorStat: (label: string) => void;
   pushRequestLog: PushRequestLog;
@@ -177,7 +179,7 @@ export function createChatRouter(deps: {
       }, "Service request");
 
       try {
-        let result: { promptTokens: number; completionTokens: number; ttftMs?: number };
+        let result: { promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats };
         if (backend.kind === "friend") {
           triedFriendUrls.add(backend.url);
           result = await deps.handleFriendProxy({
@@ -257,7 +259,7 @@ export function createChatRouter(deps: {
 
         if (backend.kind === "friend") deps.setHealth(backend.url, true);
         const duration = Date.now() - startTime;
-        deps.recordCallStat(backendLabel, duration, result.promptTokens, result.completionTokens, result.ttftMs, selectedModel);
+        deps.recordCallStat(backendLabel, duration, result.promptTokens, result.completionTokens, result.ttftMs, selectedModel, result.cache);
         deps.pushRequestLog({
           method: req.method,
           path: req.path,

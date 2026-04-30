@@ -31,6 +31,7 @@ import {
 import { pushRequestLog } from "../services/requestLogs";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
 import { createStatsTracker } from "../services/stats";
+import { type CacheTokenStats } from "../services/stats";
 import { getPromptCacheSettings, getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
@@ -199,11 +200,20 @@ function extractGeminiTextAndReasoning(source: unknown): { text: string; reasoni
   };
 }
 
+function cacheStatsFromOpenAIUsage(usage: unknown): CacheTokenStats {
+  if (!usage || typeof usage !== "object") return {};
+  const details = (usage as Record<string, unknown>)["prompt_tokens_details"];
+  if (!details || typeof details !== "object") return {};
+  return {
+    cacheReadTokens: Number((details as Record<string, unknown>)["cached_tokens"]) || 0,
+  };
+}
+
 async function fakeStreamResponse(
   res: Response,
   json: Record<string, unknown>,
   startTime: number,
-): Promise<{ promptTokens: number; completionTokens: number; ttftMs: number }> {
+): Promise<{ promptTokens: number; completionTokens: number; ttftMs: number; cache?: CacheTokenStats }> {
   const id = (json["id"] as string) ?? `chatcmpl-fake-${Date.now()}`;
   const model = (json["model"] as string) ?? "unknown";
   const created = (json["created"] as number) ?? Math.floor(Date.now() / 1000);
@@ -273,6 +283,7 @@ async function fakeStreamResponse(
     promptTokens: usage?.prompt_tokens ?? 0,
     completionTokens: usage?.completion_tokens ?? 0,
     ttftMs,
+    cache: cacheStatsFromOpenAIUsage(usage),
   };
 }
 
@@ -419,7 +430,7 @@ async function handleOpenAI({
   tools?: OAITool[];
   toolChoice?: unknown;
   startTime: number;
-}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
+}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }> {
   const params: Parameters<typeof client.chat.completions.create>[0] = {
     model,
     messages: messages as Parameters<typeof client.chat.completions.create>[0]["messages"],
@@ -435,6 +446,7 @@ async function handleOpenAI({
       let ttftMs: number | undefined;
       let promptTokens = 0;
       let completionTokens = 0;
+      let cache: CacheTokenStats = {};
       const streamResult = await client.chat.completions.create({
         ...params,
         stream: true,
@@ -447,12 +459,13 @@ async function handleOpenAI({
         if (chunk.usage) {
           promptTokens = chunk.usage.prompt_tokens ?? 0;
           completionTokens = chunk.usage.completion_tokens ?? 0;
+          cache = cacheStatsFromOpenAIUsage(chunk.usage);
         }
         writeAndFlush(res, `data: ${JSON.stringify(chunk)}\n\n`);
       }
       writeAndFlush(res, "data: [DONE]\n\n");
       res.end();
-      return { promptTokens, completionTokens, ttftMs };
+      return { promptTokens, completionTokens, ttftMs, cache };
     } catch (streamErr) {
       if (res.headersSent || !getRoutingSettings().fakeStream) throw streamErr;
       req.log.warn({ err: streamErr }, "Real streaming failed, falling back to fake-stream");
@@ -465,6 +478,7 @@ async function handleOpenAI({
     return {
       promptTokens: result.usage?.prompt_tokens ?? 0,
       completionTokens: result.usage?.completion_tokens ?? 0,
+      cache: cacheStatsFromOpenAIUsage(result.usage),
     };
   }
 }

@@ -49,6 +49,8 @@ export function createAdminRouter(deps: {
         streamingCalls: stat.streamingCalls,
         promptTokens: stat.promptTokens,
         completionTokens: stat.completionTokens,
+        cacheReadTokens: stat.cacheReadTokens,
+        cacheCreationTokens: stat.cacheCreationTokens,
         totalTokens: stat.promptTokens + stat.completionTokens,
         avgDurationMs: stat.calls > 0 ? Math.round(stat.totalDurationMs / stat.calls) : 0,
         avgTtftMs: stat.streamingCalls > 0 ? Math.round(stat.totalTtftMs / stat.streamingCalls) : null,

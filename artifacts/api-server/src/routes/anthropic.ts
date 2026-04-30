@@ -14,6 +14,7 @@ import {
 import { type RequestLog } from "../services/requestLogs";
 import { HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
 import { type PromptCacheSettings } from "./settings";
+import { type CacheTokenStats } from "../services/stats";
 
 type OAIContentPart =
   | { type: "text"; text: string }
@@ -102,6 +103,13 @@ function buildOpenAIUsageFromAnthropic(usage: AnthropicUsage): Record<string, un
       cache_creation_tokens: usage.cache_creation_input_tokens ?? 0,
       input_tokens: usage.input_tokens ?? 0,
     },
+  };
+}
+
+function cacheStatsFromAnthropicUsage(usage: AnthropicUsage | undefined): CacheTokenStats {
+  return {
+    cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+    cacheCreationTokens: usage?.cache_creation_input_tokens ?? 0,
   };
 }
 
@@ -259,7 +267,7 @@ export async function handleClaude(args: {
   toolChoice?: unknown;
   startTime: number;
   promptCache: PromptCacheSettings;
-}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
+}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }> {
   const { req, res, client, model, messages, stream, maxTokens, thinking = false, tools, toolChoice, startTime, promptCache } = args;
 
   const systemMessages = messages
@@ -360,6 +368,7 @@ export async function handleClaude(args: {
 
       let inputTokens = 0;
       let outputTokens = 0;
+      let cache: CacheTokenStats = {};
       let ttftMs: number | undefined;
       let currentToolIndex = -1;
       const toolIndexMap = new Map<number, number>();
@@ -368,6 +377,7 @@ export async function handleClaude(args: {
       for await (const event of claudeStream) {
         if (event.type === "message_start") {
           inputTokens = totalAnthropicInputTokens(event.message.usage as AnthropicUsage);
+          cache = cacheStatsFromAnthropicUsage(event.message.usage as AnthropicUsage);
           writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] })}\n\n`);
         } else if (event.type === "content_block_start") {
           const block = event.content_block;
@@ -405,7 +415,7 @@ export async function handleClaude(args: {
 
       writeAndFlush(res, "data: [DONE]\n\n");
       res.end();
-      return { promptTokens: inputTokens, completionTokens: outputTokens, ttftMs };
+      return { promptTokens: inputTokens, completionTokens: outputTokens, ttftMs, cache };
     } finally {
       clearInterval(keepalive);
     }
@@ -474,6 +484,7 @@ export async function handleClaude(args: {
   return {
     promptTokens: totalAnthropicInputTokens(result.usage as AnthropicUsage),
     completionTokens: result.usage.output_tokens,
+    cache: cacheStatsFromAnthropicUsage(result.usage as AnthropicUsage),
   };
 }
 
@@ -487,6 +498,7 @@ export function createAnthropicRouter(deps: {
     completion: number,
     ttftMs?: number,
     model?: string,
+    cache?: CacheTokenStats,
   ) => void;
   recordErrorStat: (label: string) => void;
   pushRequestLog: PushRequestLog;
@@ -594,6 +606,7 @@ export function createAnthropicRouter(deps: {
 
         let inputTokens = 0;
         let outputTokens = 0;
+        let cache: CacheTokenStats = {};
 
         try {
           const claudeStream = client.messages.stream(createParams as Parameters<typeof client.messages.stream>[0]);
@@ -601,6 +614,7 @@ export function createAnthropicRouter(deps: {
           for await (const event of claudeStream) {
             if (event.type === "message_start") {
               inputTokens = totalAnthropicInputTokens(event.message.usage as AnthropicUsage);
+              cache = cacheStatsFromAnthropicUsage(event.message.usage as AnthropicUsage);
             } else if (event.type === "message_delta") {
               outputTokens = event.usage.output_tokens;
             }
@@ -609,7 +623,7 @@ export function createAnthropicRouter(deps: {
           writeAndFlush(res, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
           res.end();
           const dur = Date.now() - startTime;
-          deps.recordCallStat("local", dur, inputTokens, outputTokens, undefined, selectedModel);
+          deps.recordCallStat("local", dur, inputTokens, outputTokens, undefined, selectedModel, cache);
           deps.pushRequestLog({
             method: req.method,
             path: req.path,
@@ -629,7 +643,7 @@ export function createAnthropicRouter(deps: {
         const result = await client.messages.create(createParams);
         const usage = ((result as { usage?: AnthropicUsage }).usage ?? {});
         const dur = Date.now() - startTime;
-        deps.recordCallStat("local", dur, totalAnthropicInputTokens(usage), usage.output_tokens ?? 0, undefined, selectedModel);
+        deps.recordCallStat("local", dur, totalAnthropicInputTokens(usage), usage.output_tokens ?? 0, undefined, selectedModel, cacheStatsFromAnthropicUsage(usage));
         deps.pushRequestLog({
           method: req.method,
           path: req.path,

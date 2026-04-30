@@ -7,6 +7,8 @@ export interface BackendStat {
   errors: number;
   promptTokens: number;
   completionTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
   totalDurationMs: number;
   totalTtftMs: number;
   streamingCalls: number;
@@ -16,7 +18,14 @@ export interface ModelStat {
   calls: number;
   promptTokens: number;
   completionTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
   capability?: ModelCapability;
+}
+
+export interface CacheTokenStats {
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
 }
 
 const STATS_FILE = "usage_stats.json";
@@ -26,6 +35,8 @@ const EMPTY_STAT = (): BackendStat => ({
   errors: 0,
   promptTokens: 0,
   completionTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
   totalDurationMs: 0,
   totalTtftMs: 0,
   streamingCalls: 0,
@@ -35,6 +46,8 @@ const EMPTY_MODEL_STAT = (): ModelStat => ({
   calls: 0,
   promptTokens: 0,
   completionTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
 });
 
 export function createStatsTracker(resolveCapability: (model: string) => ModelCapability) {
@@ -95,6 +108,8 @@ export function createStatsTracker(resolveCapability: (model: string) => ModelCa
               errors: Number(item.errors) || 0,
               promptTokens: Number(item.promptTokens) || 0,
               completionTokens: Number(item.completionTokens) || 0,
+              cacheReadTokens: Number(item.cacheReadTokens) || 0,
+              cacheCreationTokens: Number(item.cacheCreationTokens) || 0,
               totalDurationMs: Number(item.totalDurationMs) || 0,
               totalTtftMs: Number(item.totalTtftMs) || 0,
               streamingCalls: Number(item.streamingCalls) || 0,
@@ -110,6 +125,8 @@ export function createStatsTracker(resolveCapability: (model: string) => ModelCa
                 calls: Number(item.calls) || 0,
                 promptTokens: Number(item.promptTokens) || 0,
                 completionTokens: Number(item.completionTokens) || 0,
+                cacheReadTokens: Number(item.cacheReadTokens) || 0,
+                cacheCreationTokens: Number(item.cacheCreationTokens) || 0,
                 capability: item.capability === "image" ? "image" : "chat",
               });
             }
@@ -146,11 +163,14 @@ export function createStatsTracker(resolveCapability: (model: string) => ModelCa
     completion: number,
     ttftMs?: number,
     model?: string,
+    cache?: CacheTokenStats,
   ): void {
     const stat = getStat(label);
     stat.calls++;
     stat.promptTokens += prompt;
     stat.completionTokens += completion;
+    stat.cacheReadTokens += cache?.cacheReadTokens ?? 0;
+    stat.cacheCreationTokens += cache?.cacheCreationTokens ?? 0;
     stat.totalDurationMs += durationMs;
 
     if (ttftMs !== undefined) {
@@ -163,6 +183,8 @@ export function createStatsTracker(resolveCapability: (model: string) => ModelCa
       modelStat.calls++;
       modelStat.promptTokens += prompt;
       modelStat.completionTokens += completion;
+      modelStat.cacheReadTokens += cache?.cacheReadTokens ?? 0;
+      modelStat.cacheCreationTokens += cache?.cacheCreationTokens ?? 0;
       modelStat.capability = resolveCapability(model);
     }
 

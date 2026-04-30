@@ -11,8 +11,8 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
-type BackendStat = { calls: number; errors: number; streamingCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; avgDurationMs: number; avgTtftMs: number | null; health: string; url?: string; dynamic?: boolean; enabled?: boolean };
-type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
+type BackendStat = { calls: number; errors: number; streamingCalls: number; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; totalTokens: number; avgDurationMs: number; avgTtftMs: number | null; health: string; url?: string; dynamic?: boolean; enabled?: boolean };
+type ModelStat = { calls: number; promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; capability?: "chat" | "image" };
 
 type ModelPricing = {
   input: number;
@@ -182,6 +182,11 @@ export function StatsPage({
     : null;
 
   const unpricedChatModelCount = chatModelEntries.filter(([model, ms]) => ms.calls > 0 && !getModelPricing(model)).length;
+  const totalCacheReadTokens = chatModelEntries.reduce((sum, [, ms]) => sum + (ms.cacheReadTokens ?? 0), 0);
+  const totalCacheCreationTokens = chatModelEntries.reduce((sum, [, ms]) => sum + (ms.cacheCreationTokens ?? 0), 0);
+  const totalCacheTokens = totalCacheReadTokens + totalCacheCreationTokens;
+  const totalPromptTokensFromModels = chatModelEntries.reduce((sum, [, ms]) => sum + ms.promptTokens, 0);
+  const cacheTokenRatio = totalPromptTokensFromModels > 0 ? totalCacheReadTokens / totalPromptTokensFromModels : 0;
 
   const hasModelStats = chatModelEntries.some(([, ms]) => ms.calls > 0) || imageModelEntries.some(([, ms]) => ms.calls > 0);
 
@@ -200,6 +205,8 @@ export function StatsPage({
           promptTokens: ms.promptTokens,
           completionTokens: ms.completionTokens,
           totalTokens: ms.promptTokens + ms.completionTokens,
+          cacheReadTokens: ms.cacheReadTokens ?? 0,
+          cacheCreationTokens: ms.cacheCreationTokens ?? 0,
           cost: capability === "image" ? null : estimateModelCost(model, ms.promptTokens, ms.completionTokens),
         };
       });
@@ -232,11 +239,13 @@ export function StatsPage({
     streamingCalls: acc.streamingCalls + (s.streamingCalls ?? 0),
     promptTokens: acc.promptTokens + s.promptTokens,
     completionTokens: acc.completionTokens + s.completionTokens,
+    cacheReadTokens: acc.cacheReadTokens + (s.cacheReadTokens ?? 0),
+    cacheCreationTokens: acc.cacheCreationTokens + (s.cacheCreationTokens ?? 0),
     totalTokens: acc.totalTokens + s.totalTokens,
     totalDuration: acc.totalDuration + (s.avgDurationMs * s.calls),
     totalTtft: acc.totalTtft + ((s.avgTtftMs ?? 0) * (s.streamingCalls ?? 0)),
     totalStreamCalls: acc.totalStreamCalls + (s.streamingCalls ?? 0),
-  }), { calls: 0, errors: 0, streamingCalls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, totalDuration: 0, totalTtft: 0, totalStreamCalls: 0 }) : null;
+  }), { calls: 0, errors: 0, streamingCalls: 0, promptTokens: 0, completionTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0, totalDuration: 0, totalTtft: 0, totalStreamCalls: 0 }) : null;
 
   const successfulCalls = totals ? Math.max(0, totals.calls - totals.errors) : 0;
   const successRate = totals && totals.calls > 0
@@ -400,6 +409,29 @@ export function StatsPage({
               </div>
             </div>
           </Card>
+
+            <Card className="flex flex-col border-cyan-500/10 shadow-sm border-t-2 border-t-cyan-500 lg:col-span-1">
+            <div className="flex items-center gap-2 text-cyan-500 mb-4 font-semibold text-sm">
+              <Zap size={16} /> 上游缓存
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">读缓存</div>
+                <div className="text-2xl font-bold font-mono tracking-tight text-cyan-400">{fmt(totalCacheReadTokens)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">写缓存</div>
+                <div className="text-2xl font-bold font-mono tracking-tight text-cyan-300">{fmt(totalCacheCreationTokens)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">命中占比</div>
+                <div className="text-2xl font-bold font-mono tracking-tight text-cyan-500">{Math.round(cacheTokenRatio * 100)}%</div>
+              </div>
+            </div>
+            <div className="mt-4 text-xs text-muted-foreground leading-relaxed">
+              这里统计 Claude cache_read / cache_creation，以及 OpenAI 返回的 cached_tokens。它不是复用旧回答，而是上游 prompt cache。
+            </div>
+          </Card>
           </div>
 
           <Card>
@@ -453,7 +485,7 @@ export function StatsPage({
                                   {item.capability === "image" ? "图片" : "文本"}
                                 </span>
                               </div>
-                              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                              <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-xs">
                                 <div>
                                   <div className="text-muted-foreground mb-1">调用次数</div>
                                   <div className="font-semibold text-foreground">{item.calls}</div>
@@ -469,6 +501,10 @@ export function StatsPage({
                                 <div>
                                   <div className="text-muted-foreground mb-1">总 Token</div>
                                   <div className="font-semibold text-foreground">{fmt(item.totalTokens)}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground mb-1">缓存 Token</div>
+                                  <div className="font-semibold text-foreground">{fmt(item.cacheReadTokens + item.cacheCreationTokens)}</div>
                                 </div>
                                 <div>
                                   <div className="text-muted-foreground mb-1">预估开销</div>
