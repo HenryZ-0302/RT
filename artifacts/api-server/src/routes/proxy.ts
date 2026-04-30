@@ -405,7 +405,7 @@ router.use(createChatRouter({
     res: args.res,
     backend: args.backend,
     model: args.model,
-    messages: args.messages,
+    messages: args.messages.map((message) => ({ content: message.content })),
     stream: args.stream,
     maxTokens: args.maxTokens,
     tools: args.tools,

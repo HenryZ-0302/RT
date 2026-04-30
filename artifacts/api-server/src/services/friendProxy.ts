@@ -214,8 +214,8 @@ export async function handleFriendChatProxy(args: {
     res: Response,
     json: Record<string, unknown>,
     startTime: number,
-  ) => Promise<{ promptTokens: number; completionTokens: number; ttftMs: number }>;
-}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
+  ) => Promise<{ promptTokens: number; completionTokens: number; ttftMs: number; cache?: unknown }>;
+}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: unknown }> {
   const {
     req,
     res,

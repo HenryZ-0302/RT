@@ -193,7 +193,6 @@ export function createChatRouter(deps: {
             tools,
             toolChoice: tool_choice,
             startTime,
-            promptCache: deps.getPromptCacheSettings(),
           });
         } else if (isClaudeModel) {
           const { actualModel, thinkingEnabled, resolvedMaxTokens } = deps.resolveClaudeThinkingModel(selectedModel, max_tokens);
@@ -210,6 +209,7 @@ export function createChatRouter(deps: {
             tools,
             toolChoice: tool_choice,
             startTime,
+            promptCache: deps.getPromptCacheSettings(),
           });
         } else if (isGeminiModel) {
           const thinkingEnabled = selectedModel.endsWith("-thinking");
