@@ -101,7 +101,7 @@ export function createChatRouter(deps: {
     tools?: OAITool[];
     toolChoice?: unknown;
     startTime: number;
-    promptCache: PromptCacheSettings;
+    promptCache?: PromptCacheSettings;
   }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }>;
   isFriendProxyHttpError: (err: unknown) => err is FriendProxyHttpError;
   isHttpStatusError: (err: unknown) => err is { status: number };

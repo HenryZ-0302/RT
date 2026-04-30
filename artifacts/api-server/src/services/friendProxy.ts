@@ -1,5 +1,6 @@
 import { type Response } from "express";
 import { type Backend } from "./backendPool";
+import { type CacheTokenStats } from "./stats";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "./routeSupport";
 
 function estimateTokensFromChars(chars: number): number {
@@ -214,8 +215,8 @@ export async function handleFriendChatProxy(args: {
     res: Response,
     json: Record<string, unknown>,
     startTime: number,
-  ) => Promise<{ promptTokens: number; completionTokens: number; ttftMs: number; cache?: unknown }>;
-}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: unknown }> {
+  ) => Promise<{ promptTokens: number; completionTokens: number; ttftMs: number; cache?: CacheTokenStats }>;
+}): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }> {
   const {
     req,
     res,

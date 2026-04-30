@@ -74,8 +74,8 @@ function buildReasoningFields(reasoning: string): { reasoning: string; reasoning
   };
 }
 
-function buildPromptCacheParam(settings: PromptCacheSettings): Record<string, unknown> {
-  if (!settings.enabled) return {};
+function buildPromptCacheParam(settings: PromptCacheSettings | undefined): Record<string, unknown> {
+  if (!settings?.enabled) return {};
   return {
     cache_control: {
       type: "ephemeral",
@@ -266,7 +266,7 @@ export async function handleClaude(args: {
   tools?: OAITool[];
   toolChoice?: unknown;
   startTime: number;
-  promptCache: PromptCacheSettings;
+  promptCache?: PromptCacheSettings;
 }): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number; cache?: CacheTokenStats }> {
   const { req, res, client, model, messages, stream, maxTokens, thinking = false, tools, toolChoice, startTime, promptCache } = args;
 
