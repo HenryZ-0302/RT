@@ -18,6 +18,7 @@ type BackendStat = { calls: number; errors: number; streamingCalls: number; prom
 type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
 interface ModelStatus { id: string; description?: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
+type PromptCacheSettings = { enabled: boolean; ttl: "5m" | "1h" };
 type MetricsResponse = {
   stats?: Record<string, Record<string, unknown>>;
   modelStats?: Record<string, ModelStat>;
@@ -29,6 +30,8 @@ export default function App() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [sillyTavernMode, setSillyTavernMode] = useState(false);
   const [stLoading, setStLoading] = useState(false);
+  const [promptCache, setPromptCache] = useState<PromptCacheSettings>({ enabled: true, ttl: "5m" });
+  const [promptCacheLoading, setPromptCacheLoading] = useState(false);
   const [apiKey, setApiKey] = useState(() => getStoredServiceKey());
   const [gateKey, setGateKey] = useState(() => getStoredServiceKey());
   const [gateReady, setGateReady] = useState(false);
@@ -104,6 +107,55 @@ export default function App() {
       if (!res.ok) setSillyTavernMode(!newVal);
     } catch { setSillyTavernMode(!newVal); }
   };
+
+  const fetchPromptCache = useCallback(async (key: string) => {
+    const trimmed = key.trim();
+    if (!trimmed) return;
+
+    setPromptCacheLoading(true);
+    try {
+      const res = await fetch(servicePaths.promptCache(baseUrl), {
+        headers: { Authorization: `Bearer ${trimmed}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as Partial<PromptCacheSettings>;
+        setPromptCache({
+          enabled: data.enabled === true,
+          ttl: data.ttl === "1h" ? "1h" : "5m",
+        });
+      }
+    } catch {}
+    finally {
+      setPromptCacheLoading(false);
+    }
+  }, [baseUrl]);
+
+  const updatePromptCache = useCallback(async (patch: Partial<PromptCacheSettings>) => {
+    if (!apiKey) return;
+    const next = { ...promptCache, ...patch };
+    setPromptCache(next);
+    setPromptCacheLoading(true);
+    try {
+      const res = await fetch(servicePaths.promptCache(baseUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        setPromptCache(promptCache);
+        return;
+      }
+      const data = await res.json() as Partial<PromptCacheSettings>;
+      setPromptCache({
+        enabled: data.enabled === true,
+        ttl: data.ttl === "1h" ? "1h" : "5m",
+      });
+    } catch {
+      setPromptCache(promptCache);
+    } finally {
+      setPromptCacheLoading(false);
+    }
+  }, [apiKey, baseUrl, promptCache]);
 
   const verifyServiceKey = useCallback(async (candidate: string) => {
     const trimmed = candidate.trim();
@@ -338,7 +390,8 @@ export default function App() {
   useEffect(() => {
     if (!gateUnlocked || !apiKey) return;
     void fetchSTMode(apiKey);
-  }, [apiKey, fetchSTMode, gateUnlocked]);
+    void fetchPromptCache(apiKey);
+  }, [apiKey, fetchPromptCache, fetchSTMode, gateUnlocked]);
   useEffect(() => {
     if (!gateUnlocked) return;
     fetchModels(apiKey);
@@ -508,6 +561,9 @@ export default function App() {
                 sillyTavernMode={sillyTavernMode}
                 stLoading={stLoading}
                 onToggleSTMode={toggleSTMode}
+                promptCache={promptCache}
+                promptCacheLoading={promptCacheLoading}
+                onUpdatePromptCache={updatePromptCache}
               />
             </Route>
           </Switch>

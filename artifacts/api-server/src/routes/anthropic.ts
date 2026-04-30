@@ -13,6 +13,7 @@ import {
 } from "../services/modelRegistry";
 import { type RequestLog } from "../services/requestLogs";
 import { HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
+import { type PromptCacheSettings } from "./settings";
 
 type OAIContentPart =
   | { type: "text"; text: string }
@@ -50,6 +51,12 @@ type AnthropicContentPart =
 type AnthropicMessage = { role: "user" | "assistant"; content: string | AnthropicContentPart[] };
 
 type PushRequestLog = (entry: Omit<RequestLog, "id" | "time">) => void;
+type AnthropicUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
 
 const ANTHROPIC_NATIVE_TOOL_TYPE_ALIASES: Record<string, string> = {
   web_search_20260209: "web_search_20250305",
@@ -63,6 +70,38 @@ function buildReasoningFields(reasoning: string): { reasoning: string; reasoning
   return {
     reasoning,
     reasoning_content: reasoning,
+  };
+}
+
+function buildPromptCacheParam(settings: PromptCacheSettings): Record<string, unknown> {
+  if (!settings.enabled) return {};
+  return {
+    cache_control: {
+      type: "ephemeral",
+      ttl: settings.ttl,
+    },
+  };
+}
+
+function totalAnthropicInputTokens(usage: AnthropicUsage | undefined): number {
+  if (!usage) return 0;
+  return (usage.input_tokens ?? 0)
+    + (usage.cache_creation_input_tokens ?? 0)
+    + (usage.cache_read_input_tokens ?? 0);
+}
+
+function buildOpenAIUsageFromAnthropic(usage: AnthropicUsage): Record<string, unknown> {
+  const promptTokens = totalAnthropicInputTokens(usage);
+  const completionTokens = usage.output_tokens ?? 0;
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    prompt_tokens_details: {
+      cached_tokens: usage.cache_read_input_tokens ?? 0,
+      cache_creation_tokens: usage.cache_creation_input_tokens ?? 0,
+      input_tokens: usage.input_tokens ?? 0,
+    },
   };
 }
 
@@ -219,8 +258,9 @@ export async function handleClaude(args: {
   tools?: OAITool[];
   toolChoice?: unknown;
   startTime: number;
+  promptCache: PromptCacheSettings;
 }): Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }> {
-  const { req, res, client, model, messages, stream, maxTokens, thinking = false, tools, toolChoice, startTime } = args;
+  const { req, res, client, model, messages, stream, maxTokens, thinking = false, tools, toolChoice, startTime, promptCache } = args;
 
   const systemMessages = messages
     .filter((message) => message.role === "system")
@@ -299,6 +339,7 @@ export async function handleClaude(args: {
     model,
     max_tokens: maxTokens,
     ...(systemMessages ? { system: systemMessages } : {}),
+    ...buildPromptCacheParam(promptCache),
     ...thinkingParam,
     messages: chatMessages,
     ...(anthropicTools?.length ? { tools: anthropicTools } : {}),
@@ -326,7 +367,7 @@ export async function handleClaude(args: {
 
       for await (const event of claudeStream) {
         if (event.type === "message_start") {
-          inputTokens = event.message.usage.input_tokens;
+          inputTokens = totalAnthropicInputTokens(event.message.usage as AnthropicUsage);
           writeAndFlush(res, `data: ${JSON.stringify({ id: msgId, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] })}\n\n`);
         } else if (event.type === "content_block_start") {
           const block = event.content_block;
@@ -427,18 +468,18 @@ export async function handleClaude(args: {
       },
       finish_reason: finishReason,
     }],
-    usage: {
-      prompt_tokens: result.usage.input_tokens,
-      completion_tokens: result.usage.output_tokens,
-      total_tokens: result.usage.input_tokens + result.usage.output_tokens,
-    },
+    usage: buildOpenAIUsageFromAnthropic(result.usage as AnthropicUsage),
   });
 
-  return { promptTokens: result.usage.input_tokens, completionTokens: result.usage.output_tokens };
+  return {
+    promptTokens: totalAnthropicInputTokens(result.usage as AnthropicUsage),
+    completionTokens: result.usage.output_tokens,
+  };
 }
 
 export function createAnthropicRouter(deps: {
   makeLocalAnthropic: () => Anthropic;
+  getPromptCacheSettings: () => PromptCacheSettings;
   recordCallStat: (
     label: string,
     durationMs: number,
@@ -535,6 +576,7 @@ export function createAnthropicRouter(deps: {
         max_tokens: resolvedMaxTokens,
         messages,
         ...(system ? { system } : {}),
+        ...buildPromptCacheParam(deps.getPromptCacheSettings()),
         ...(normalizedThinking ? { thinking: normalizedThinking } : {}),
         ...rest,
       } as Parameters<typeof client.messages.create>[0];
@@ -558,7 +600,7 @@ export function createAnthropicRouter(deps: {
 
           for await (const event of claudeStream) {
             if (event.type === "message_start") {
-              inputTokens = event.message.usage.input_tokens;
+              inputTokens = totalAnthropicInputTokens(event.message.usage as AnthropicUsage);
             } else if (event.type === "message_delta") {
               outputTokens = event.usage.output_tokens;
             }
@@ -585,9 +627,9 @@ export function createAnthropicRouter(deps: {
         }
       } else {
         const result = await client.messages.create(createParams);
-        const usage = (result as { usage?: { input_tokens?: number; output_tokens?: number } }).usage ?? {};
+        const usage = ((result as { usage?: AnthropicUsage }).usage ?? {});
         const dur = Date.now() - startTime;
-        deps.recordCallStat("local", dur, usage.input_tokens ?? 0, usage.output_tokens ?? 0, undefined, selectedModel);
+        deps.recordCallStat("local", dur, totalAnthropicInputTokens(usage), usage.output_tokens ?? 0, undefined, selectedModel);
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
@@ -596,7 +638,7 @@ export function createAnthropicRouter(deps: {
           status: 200,
           duration: dur,
           stream: false,
-          promptTokens: usage.input_tokens ?? 0,
+          promptTokens: totalAnthropicInputTokens(usage),
           completionTokens: usage.output_tokens ?? 0,
           level: "info",
         });

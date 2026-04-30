@@ -8,6 +8,7 @@ import { type Backend } from "../services/backendPool";
 import { type RequestLog } from "../services/requestLogs";
 import { type RegisteredProvider } from "../services/modelRegistry";
 import { type FriendProxyHttpError } from "../services/routeSupport";
+import { type PromptCacheSettings } from "./settings";
 
 type OAIContentPart =
   | { type: "text"; text: string }
@@ -49,6 +50,7 @@ export function createChatRouter(deps: {
     resolvedMaxTokens: number;
   };
   getSillyTavernMode: () => boolean;
+  getPromptCacheSettings: () => PromptCacheSettings;
   makeLocalAnthropic: () => Anthropic;
   makeLocalOpenAI: () => OpenAI;
   makeLocalOpenRouter: () => OpenAI;
@@ -63,6 +65,7 @@ export function createChatRouter(deps: {
     tools?: OAITool[];
     toolChoice?: unknown;
     startTime: number;
+    promptCache: PromptCacheSettings;
   }) => Promise<{ promptTokens: number; completionTokens: number; ttftMs?: number }>;
   handleOpenAI: (args: {
     req: Request;
@@ -188,6 +191,7 @@ export function createChatRouter(deps: {
             tools,
             toolChoice: tool_choice,
             startTime,
+            promptCache: deps.getPromptCacheSettings(),
           });
         } else if (isClaudeModel) {
           const { actualModel, thinkingEnabled, resolvedMaxTokens } = deps.resolveClaudeThinkingModel(selectedModel, max_tokens);

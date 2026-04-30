@@ -31,7 +31,7 @@ import {
 import { pushRequestLog } from "../services/requestLogs";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
 import { createStatsTracker } from "../services/stats";
-import { getSillyTavernMode } from "./settings";
+import { getPromptCacheSettings, getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
 router.use(catalogRouter);
@@ -368,6 +368,7 @@ router.use(createGeminiRouter({
 
 router.use(createAnthropicRouter({
   makeLocalAnthropic,
+  getPromptCacheSettings,
   recordCallStat,
   recordErrorStat,
   pushRequestLog,
@@ -384,6 +385,7 @@ router.use(createChatRouter({
   isModelEnabled,
   resolveClaudeThinkingModel,
   getSillyTavernMode,
+  getPromptCacheSettings,
   makeLocalAnthropic,
   makeLocalOpenAI,
   makeLocalOpenRouter,

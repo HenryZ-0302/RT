@@ -395,7 +395,7 @@ export function StatsPage({
                 <div className="flex justify-between mt-1"><span>图片请求:</span> <span>{imageModelEntries.reduce((sum, [, ms]) => sum + ms.calls, 0)}</span></div>
                 <div className="flex justify-between mt-1"><span>未计价文本模型:</span> <span>{unpricedChatModelCount}</span></div>
                 <div className="mt-2 text-[11px] leading-relaxed">
-                  Token 统计优先使用 provider 返回的 usage；Gemini thinking token 按计费口径并入输出。缺失时才按字符估算。计费仅按已知官方文本模型单价估算，未计入 cached input、web search、tool 等附加费用；OpenRouter 与未映射模型不强行套统一价格。
+                  Token 统计优先使用 provider 返回的 usage；Claude prompt cache 的创建/读取 token 会计入输入 token，Gemini thinking token 按计费口径并入输出。缺失时才按字符估算。计费仅按已知官方文本模型单价估算，未细分 cache read/write、web search、tool 等附加费用；OpenRouter 与未映射模型不强行套统一价格。
                 </div>
               </div>
             </div>
