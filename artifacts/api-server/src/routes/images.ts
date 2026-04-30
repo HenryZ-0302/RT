@@ -48,6 +48,14 @@ export function createImagesRouter(deps: {
 }): IRouter {
   const router = Router();
 
+  function firstParam(value: string | string[] | undefined): string {
+    return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  }
+
+  function backendLabel(backend: Backend): string {
+    return backend.kind === "local" ? "local" : backend.label;
+  }
+
   function detectMimeTypeFromUrl(url: string): string {
     const lower = url.toLowerCase();
     if (lower.endsWith(".png")) return "image/png";
@@ -216,7 +224,9 @@ export function createImagesRouter(deps: {
       const client = deps.makeLocalGemini();
       const contents = nativeContents ?? await buildGeminiImageContents(prompt, imageInputs);
       const sizeConfig = mapOpenAIImageSize(size);
-      const response = await client.models.generateContent({
+      const response = await (client.models as unknown as {
+        generateContent: (args: Record<string, unknown>) => Promise<unknown>;
+      }).generateContent({
         model,
         contents,
         config: {
@@ -272,7 +282,7 @@ export function createImagesRouter(deps: {
 
     const triedFriendUrls = new Set<string>();
     for (let attempt = 0; ; attempt++) {
-      const backendLabel = backend.kind === "local" ? "local" : backend.label;
+      const label = backendLabel(backend);
       try {
         let responseJson: Record<string, unknown>;
         if (backend.kind === "friend") {
@@ -314,13 +324,13 @@ export function createImagesRouter(deps: {
 
         const duration = Date.now() - startTime;
         if (backend.kind === "friend") deps.setHealth(backend.url, true);
-        deps.recordImageCallStat(backendLabel, duration, selectedModel);
+        deps.recordImageCallStat(label, duration, selectedModel);
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "image",
-          backend: backendLabel,
+          backend: label,
           status: 200,
           duration,
           stream: false,
@@ -329,12 +339,16 @@ export function createImagesRouter(deps: {
         return responseJson;
       } catch (err) {
         const duration = Date.now() - startTime;
+        const failedBackend = backend;
         if (backend.kind === "friend") {
           deps.setHealth(backend.url, false);
           const status = err instanceof FriendProxyHttpError ? err.status : 502;
           if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-            backend = deps.pickBackendExcluding(triedFriendUrls);
-            if (backend && attempt < 3) continue;
+            const nextBackend = deps.pickBackendExcluding(triedFriendUrls);
+            if (nextBackend && attempt < 3) {
+              backend = nextBackend;
+              continue;
+            }
           }
         }
         const status = err instanceof HttpStatusError
@@ -343,13 +357,13 @@ export function createImagesRouter(deps: {
             ? err.status
             : 500;
         const message = err instanceof Error ? err.message : "Unknown error";
-        deps.recordErrorStat(backend.kind === "local" ? "local" : backend.label);
+        deps.recordErrorStat(backendLabel(failedBackend));
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "image",
-          backend: backend.kind === "local" ? "local" : backend.label,
+          backend: backendLabel(failedBackend),
           status,
           duration,
           stream: false,
@@ -375,7 +389,7 @@ export function createImagesRouter(deps: {
   async function handleGeminiNativeImage(req: Request, res: Response) {
     const params = parseRequestBody(res, geminiNativeImageBodySchema, req.body) as GeminiNativeImageRequest | null;
     if (!params) return;
-    const selectedModel = req.params.model;
+    const selectedModel = firstParam(req.params.model);
     const modelInfo = deps.getRegisteredModel(selectedModel);
     if (!modelInfo || modelInfo.capability !== "image") {
       throw new HttpStatusError(400, `Model '${selectedModel}' is not an image generation model.`);
@@ -397,7 +411,7 @@ export function createImagesRouter(deps: {
     const triedFriendUrls = new Set<string>();
 
     for (let attempt = 0; ; attempt++) {
-      const backendLabel = backend.kind === "local" ? "local" : backend.label;
+      const label = backendLabel(backend);
       try {
         let responseJson: Record<string, unknown>;
         if (backend.kind === "friend") {
@@ -430,13 +444,13 @@ export function createImagesRouter(deps: {
 
         const duration = Date.now() - startTime;
         if (backend.kind === "friend") deps.setHealth(backend.url, true);
-        deps.recordImageCallStat(backendLabel, duration, selectedModel);
+        deps.recordImageCallStat(label, duration, selectedModel);
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "image",
-          backend: backendLabel,
+          backend: label,
           status: 200,
           duration,
           stream: false,
@@ -446,12 +460,16 @@ export function createImagesRouter(deps: {
         return;
       } catch (err) {
         const duration = Date.now() - startTime;
+        const failedBackend = backend;
         if (backend.kind === "friend") {
           deps.setHealth(backend.url, false);
           const status = err instanceof FriendProxyHttpError ? err.status : 502;
           if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-            backend = deps.pickBackendExcluding(triedFriendUrls);
-            if (backend && attempt < 3) continue;
+            const nextBackend = deps.pickBackendExcluding(triedFriendUrls);
+            if (nextBackend && attempt < 3) {
+              backend = nextBackend;
+              continue;
+            }
           }
         }
         const status = err instanceof HttpStatusError
@@ -460,13 +478,13 @@ export function createImagesRouter(deps: {
             ? err.status
             : 500;
         const message = err instanceof Error ? err.message : "Unknown error";
-        deps.recordErrorStat(backend.kind === "local" ? "local" : backend.label);
+        deps.recordErrorStat(backendLabel(failedBackend));
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "image",
-          backend: backend.kind === "local" ? "local" : backend.label,
+          backend: backendLabel(failedBackend),
           status,
           duration,
           stream: false,
@@ -497,7 +515,7 @@ export function createImagesRouter(deps: {
 
   router.post(/^\/v1beta\/models\/([^:]+):generateImages$/, requireApiKey, async (req, res) => {
     try {
-      req.params.model = req.params[0];
+      req.params.model = firstParam(req.params[0]);
       await handleGeminiNativeImage(req, res);
     } catch (err) {
       deps.sendApiError(req, res, err);

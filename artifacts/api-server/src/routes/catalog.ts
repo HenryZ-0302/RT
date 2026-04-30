@@ -80,7 +80,7 @@ function listGeminiNativeModels(_req: Request, res: Response) {
 }
 
 function getGeminiNativeModel(req: Request, res: Response) {
-  const rawModel = req.params.model;
+  const rawModel = Array.isArray(req.params.model) ? req.params.model[0] ?? "" : req.params.model ?? "";
   const modelId = rawModel.startsWith("models/") ? rawModel.slice("models/".length) : rawModel;
 
   if (![...GEMINI_BASE_MODELS, ...GEMINI_IMAGE_MODELS].includes(modelId) || !isModelEnabled(modelId)) {

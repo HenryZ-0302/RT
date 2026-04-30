@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "../lib/utils";
 import { getStoredNodeHealthcheckModel, storeNodeHealthcheckModel } from "../lib/service";
 
@@ -18,45 +18,18 @@ function SectionTitle({ children, className }: { children: React.ReactNode; clas
   );
 }
 
-type ResponseCacheSettings = {
-  enabled: boolean;
-  ttlSeconds: number;
-  entries: number;
-  maxEntries: number;
-};
-
 export function HomePage({
   apiKey,
   sillyTavernMode,
   stLoading,
   onToggleSTMode,
-  cacheSettings,
-  cacheLoading,
-  onUpdateCacheSettings,
 }: {
   apiKey: string;
   sillyTavernMode: boolean;
   stLoading: boolean;
   onToggleSTMode: () => void;
-  cacheSettings: ResponseCacheSettings;
-  cacheLoading: boolean;
-  onUpdateCacheSettings: (patch: Partial<ResponseCacheSettings> & { clear?: boolean }) => void | Promise<void>;
 }) {
   const [nodeHealthModel, setNodeHealthModel] = useState(() => getStoredNodeHealthcheckModel());
-  const [cacheTtlInput, setCacheTtlInput] = useState(String(cacheSettings.ttlSeconds));
-
-  useEffect(() => {
-    setCacheTtlInput(String(cacheSettings.ttlSeconds));
-  }, [cacheSettings.ttlSeconds]);
-
-  const applyCacheTtl = () => {
-    const next = Number(cacheTtlInput);
-    if (!Number.isFinite(next)) {
-      setCacheTtlInput(String(cacheSettings.ttlSeconds));
-      return;
-    }
-    void onUpdateCacheSettings({ ttlSeconds: next });
-  };
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -92,72 +65,6 @@ export function HomePage({
               sillyTavernMode ? "left-[32px]" : "left-[3px]"
             )} />
           </button>
-        </div>
-      </Card>
-
-      <Card>
-        <SectionTitle>缓存模式</SectionTitle>
-        <div className="space-y-5">
-          <div className="flex items-center justify-between gap-6">
-            <div className="flex-1">
-              <h3 className="font-semibold text-[15px] mb-1">非流式聊天响应缓存</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed m-0 mb-3">
-                开启后，相同模型、相同纯文本消息和相同 max_tokens 的非流式请求会直接复用上次响应，适合重复测试和固定提示词场景。流式、工具调用、图片和多模态请求不会缓存。
-              </p>
-              <div className={cn(
-                "inline-flex px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
-                cacheSettings.enabled
-                  ? "bg-primary/10 border-primary/20 text-primary"
-                  : "bg-secondary text-muted-foreground border-border/50"
-              )}>
-                {cacheSettings.enabled
-                  ? `已启用 — 当前缓存 ${cacheSettings.entries}/${cacheSettings.maxEntries} 条`
-                  : "已禁用 — 每次请求都会真实调用模型"}
-              </div>
-            </div>
-
-            <button
-              onClick={() => void onUpdateCacheSettings({ enabled: !cacheSettings.enabled })}
-              disabled={cacheLoading || !apiKey}
-              className={cn(
-                "w-14 h-7 rounded-full transition-all relative flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed border outline-none",
-                cacheSettings.enabled ? "bg-primary border-primary" : "bg-secondary border-border"
-              )}
-              aria-label="Toggle response cache"
-            >
-              <div className={cn(
-                "w-5 h-5 bg-background rounded-full absolute top-[3px] transition-all shadow-sm",
-                cacheSettings.enabled ? "left-[32px]" : "left-[3px]"
-              )} />
-            </button>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-            <label className="space-y-2">
-              <span className="text-xs font-semibold tracking-wide uppercase text-muted-foreground">缓存有效期（秒）</span>
-              <input
-                type="number"
-                min={30}
-                max={86400}
-                value={cacheTtlInput}
-                onChange={(event) => setCacheTtlInput(event.target.value)}
-                onBlur={applyCacheTtl}
-                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all text-foreground"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => void onUpdateCacheSettings({ clear: true })}
-              disabled={cacheLoading || !apiKey || cacheSettings.entries === 0}
-              className="px-4 py-2 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              清空缓存
-            </button>
-          </div>
-
-          <div className="text-xs text-muted-foreground leading-relaxed">
-            为了安全和可预期，缓存默认关闭；命中缓存时服务端不会再次调用模型，统计页会把这次调用记为 0 token。
-          </div>
         </div>
       </Card>
 

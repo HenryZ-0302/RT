@@ -31,7 +31,7 @@ import {
 import { pushRequestLog } from "../services/requestLogs";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
 import { createStatsTracker } from "../services/stats";
-import { getResponseCacheSettings, getSillyTavernMode } from "./settings";
+import { getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
 router.use(catalogRouter);
@@ -134,9 +134,9 @@ function estimateTokensFromValue(value: unknown): number {
     if (visited.has(current)) return 0;
     visited.add(current);
 
-    if (Array.isArray(current)) return current.reduce((sum, item) => sum + walk(item), 0);
+    if (Array.isArray(current)) return current.reduce<number>((sum, item) => sum + walk(item), 0);
 
-    return Object.values(current as Record<string, unknown>).reduce((sum, item) => sum + walk(item), 0);
+    return Object.values(current as Record<string, unknown>).reduce<number>((sum, item) => sum + walk(item), 0);
   };
 
   return Math.max(1, Math.ceil(walk(value) / 4));
@@ -382,7 +382,6 @@ router.use(createChatRouter({
   isChatModel,
   isImageModel,
   isModelEnabled,
-  getResponseCacheSettings,
   resolveClaudeThinkingModel,
   getSillyTavernMode,
   makeLocalAnthropic,
@@ -390,6 +389,7 @@ router.use(createChatRouter({
   makeLocalOpenRouter,
   handleFriendProxy: (args) => handleFriendChatProxy({
     ...args,
+    req: { log: { info: (message: string) => args.req.log.info(message) } },
     fakeStreamEnabled: getRoutingSettings().fakeStream,
     fakeStreamResponse,
   }),
@@ -423,9 +423,9 @@ async function handleOpenAI({
     messages: messages as Parameters<typeof client.chat.completions.create>[0]["messages"],
     stream,
   };
-  if (maxTokens) (params as Record<string, unknown>)["max_completion_tokens"] = maxTokens;
-  if (tools?.length) (params as Record<string, unknown>)["tools"] = tools;
-  if (toolChoice !== undefined) (params as Record<string, unknown>)["tool_choice"] = toolChoice;
+  if (maxTokens) (params as unknown as Record<string, unknown>)["max_completion_tokens"] = maxTokens;
+  if (tools?.length) (params as unknown as Record<string, unknown>)["tools"] = tools;
+  if (toolChoice !== undefined) (params as unknown as Record<string, unknown>)["tool_choice"] = toolChoice;
 
   if (stream) {
     try {

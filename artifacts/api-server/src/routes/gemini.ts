@@ -42,6 +42,14 @@ export function createGeminiRouter(deps: {
 }): IRouter {
   const router = Router();
 
+  function firstParam(value: string | string[] | undefined): string {
+    return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  }
+
+  function backendLabel(backend: Backend): string {
+    return backend.kind === "local" ? "local" : backend.label;
+  }
+
   function normalizeGeminiNativeModel(rawModel: string): string {
     return rawModel.startsWith("models/") ? rawModel.slice("models/".length) : rawModel;
   }
@@ -92,9 +100,9 @@ export function createGeminiRouter(deps: {
       if (visited.has(value)) return 0;
       visited.add(value);
 
-      if (Array.isArray(value)) return value.reduce((sum, item) => sum + walk(item), 0);
+      if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + walk(item), 0);
 
-      return Object.values(value as Record<string, unknown>).reduce((sum, item) => sum + walk(item), 0);
+      return Object.values(value as Record<string, unknown>).reduce<number>((sum, item) => sum + walk(item), 0);
     };
 
     return Math.max(1, Math.ceil(walk(value) / 4));
@@ -165,14 +173,14 @@ export function createGeminiRouter(deps: {
   async function handleGeminiNativeGenerateContent(req: Request, res: Response) {
     const body = parseRequestBody(res, geminiNativeGenerateContentBodySchema, req.body) as GeminiNativeGenerateContentRequest | null;
     if (!body) return;
-    const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
+    const selectedModel = getEnabledGeminiNativeChatModel(firstParam(req.params.model));
     const startTime = Date.now();
     let backend = deps.pickBackend();
     if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
     const triedFriendUrls = new Set<string>();
 
     for (let attempt = 0; ; attempt++) {
-      const backendLabel = backend.kind === "local" ? "local" : backend.label;
+      const label = backendLabel(backend);
       try {
         let responseJson: Record<string, unknown>;
         if (backend.kind === "friend") {
@@ -195,7 +203,7 @@ export function createGeminiRouter(deps: {
         const promptTokens = usage.promptTokens ?? estimateGeminiNativePromptTokens(body);
         const completionTokens = usage.completionTokens ?? estimateTokensFromChars(countGeminiNativeOutputChars(responseJson));
         deps.recordCallStat(
-          backendLabel,
+          label,
           duration,
           promptTokens,
           completionTokens,
@@ -207,7 +215,7 @@ export function createGeminiRouter(deps: {
           path: req.path,
           model: selectedModel,
           capability: "chat",
-          backend: backendLabel,
+          backend: label,
           status: 200,
           duration,
           stream: false,
@@ -219,12 +227,16 @@ export function createGeminiRouter(deps: {
         return;
       } catch (err) {
         const duration = Date.now() - startTime;
+        const failedBackend = backend;
         if (backend.kind === "friend") {
           deps.setHealth(backend.url, false);
           const status = err instanceof FriendProxyHttpError ? err.status : 502;
           if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-            backend = deps.pickBackendExcluding(triedFriendUrls);
-            if (backend && attempt < 3) continue;
+            const nextBackend = deps.pickBackendExcluding(triedFriendUrls);
+            if (nextBackend && attempt < 3) {
+              backend = nextBackend;
+              continue;
+            }
           }
         }
         const status = err instanceof HttpStatusError
@@ -233,13 +245,13 @@ export function createGeminiRouter(deps: {
             ? err.status
             : 500;
         const message = err instanceof Error ? err.message : "Unknown error";
-        deps.recordErrorStat(backend.kind === "local" ? "local" : backend.label);
+        deps.recordErrorStat(backendLabel(failedBackend));
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "chat",
-          backend: backend.kind === "local" ? "local" : backend.label,
+          backend: backendLabel(failedBackend),
           status,
           duration,
           stream: false,
@@ -255,14 +267,14 @@ export function createGeminiRouter(deps: {
   async function handleGeminiNativeStreamGenerateContent(req: Request, res: Response) {
     const body = parseRequestBody(res, geminiNativeGenerateContentBodySchema, req.body) as GeminiNativeGenerateContentRequest | null;
     if (!body) return;
-    const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
+    const selectedModel = getEnabledGeminiNativeChatModel(firstParam(req.params.model));
     const startTime = Date.now();
     let backend = deps.pickBackend();
     if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
     const triedFriendUrls = new Set<string>();
 
     for (let attempt = 0; ; attempt++) {
-      const backendLabel = backend.kind === "local" ? "local" : backend.label;
+      const label = backendLabel(backend);
       try {
         let promptTokens = 0;
         let completionTokens = 0;
@@ -309,7 +321,7 @@ export function createGeminiRouter(deps: {
         if (promptTokens === 0) promptTokens = estimateGeminiNativePromptTokens(body);
         if (completionTokens === 0) completionTokens = estimateTokensFromChars(outputChars);
         deps.recordCallStat(
-          backendLabel,
+          label,
           duration,
           promptTokens,
           completionTokens,
@@ -321,7 +333,7 @@ export function createGeminiRouter(deps: {
           path: req.path,
           model: selectedModel,
           capability: "chat",
-          backend: backendLabel,
+          backend: label,
           status: 200,
           duration,
           stream: true,
@@ -332,12 +344,16 @@ export function createGeminiRouter(deps: {
         return;
       } catch (err) {
         const duration = Date.now() - startTime;
+        const failedBackend = backend;
         if (backend.kind === "friend") {
           deps.setHealth(backend.url, false);
           const status = err instanceof FriendProxyHttpError ? err.status : 502;
           if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-            backend = deps.pickBackendExcluding(triedFriendUrls);
-            if (backend && attempt < 3 && !res.headersSent) continue;
+            const nextBackend = deps.pickBackendExcluding(triedFriendUrls);
+            if (nextBackend && attempt < 3 && !res.headersSent) {
+              backend = nextBackend;
+              continue;
+            }
           }
         }
         const status = err instanceof HttpStatusError
@@ -346,13 +362,13 @@ export function createGeminiRouter(deps: {
             ? err.status
             : 500;
         const message = err instanceof Error ? err.message : "Unknown error";
-        deps.recordErrorStat(backend.kind === "local" ? "local" : backend.label);
+        deps.recordErrorStat(backendLabel(failedBackend));
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "chat",
-          backend: backend.kind === "local" ? "local" : backend.label,
+          backend: backendLabel(failedBackend),
           status,
           duration,
           stream: true,
@@ -368,14 +384,14 @@ export function createGeminiRouter(deps: {
   async function handleGeminiNativeCountTokens(req: Request, res: Response) {
     const body = parseRequestBody(res, geminiNativeGenerateContentBodySchema, req.body) as GeminiNativeGenerateContentRequest | null;
     if (!body) return;
-    const selectedModel = getEnabledGeminiNativeChatModel(req.params.model);
+    const selectedModel = getEnabledGeminiNativeChatModel(firstParam(req.params.model));
     const startTime = Date.now();
     let backend = deps.pickBackend();
     if (!backend) throw new HttpStatusError(503, "No available backends - all sub-nodes are down and local fallback is disabled");
     const triedFriendUrls = new Set<string>();
 
     for (let attempt = 0; ; attempt++) {
-      const backendLabel = backend.kind === "local" ? "local" : backend.label;
+      const label = backendLabel(backend);
       try {
         let responseJson: Record<string, unknown>;
         if (backend.kind === "friend") {
@@ -406,7 +422,7 @@ export function createGeminiRouter(deps: {
           path: req.path,
           model: selectedModel,
           capability: "chat",
-          backend: backendLabel,
+          backend: label,
           status: 200,
           duration,
           stream: false,
@@ -416,12 +432,16 @@ export function createGeminiRouter(deps: {
         return;
       } catch (err) {
         const duration = Date.now() - startTime;
+        const failedBackend = backend;
         if (backend.kind === "friend") {
           deps.setHealth(backend.url, false);
           const status = err instanceof FriendProxyHttpError ? err.status : 502;
           if (!(err instanceof FriendProxyHttpError) || status >= 500) {
-            backend = deps.pickBackendExcluding(triedFriendUrls);
-            if (backend && attempt < 3) continue;
+            const nextBackend = deps.pickBackendExcluding(triedFriendUrls);
+            if (nextBackend && attempt < 3) {
+              backend = nextBackend;
+              continue;
+            }
           }
         }
         const status = err instanceof HttpStatusError
@@ -430,13 +450,13 @@ export function createGeminiRouter(deps: {
             ? err.status
             : 500;
         const message = err instanceof Error ? err.message : "Unknown error";
-        deps.recordErrorStat(backend.kind === "local" ? "local" : backend.label);
+        deps.recordErrorStat(backendLabel(failedBackend));
         deps.pushRequestLog({
           method: req.method,
           path: req.path,
           model: selectedModel,
           capability: "chat",
-          backend: backend.kind === "local" ? "local" : backend.label,
+          backend: backendLabel(failedBackend),
           status,
           duration,
           stream: false,
@@ -459,7 +479,7 @@ export function createGeminiRouter(deps: {
 
   router.post(/^\/v1beta\/models\/([^:]+):generateContent$/, requireApiKey, async (req, res) => {
     try {
-      req.params.model = req.params[0];
+      req.params.model = firstParam(req.params[0]);
       await handleGeminiNativeGenerateContent(req, res);
     } catch (err) {
       deps.sendApiError(req, res, err);
@@ -476,7 +496,7 @@ export function createGeminiRouter(deps: {
 
   router.post(/^\/v1beta\/models\/([^:]+):streamGenerateContent$/, requireApiKey, async (req, res) => {
     try {
-      req.params.model = req.params[0];
+      req.params.model = firstParam(req.params[0]);
       await handleGeminiNativeStreamGenerateContent(req, res);
     } catch (err) {
       deps.sendApiError(req, res, err);
@@ -493,7 +513,7 @@ export function createGeminiRouter(deps: {
 
   router.post(/^\/v1beta\/models\/([^:]+):countTokens$/, requireApiKey, async (req, res) => {
     try {
-      req.params.model = req.params[0];
+      req.params.model = firstParam(req.params[0]);
       await handleGeminiNativeCountTokens(req, res);
     } catch (err) {
       deps.sendApiError(req, res, err);

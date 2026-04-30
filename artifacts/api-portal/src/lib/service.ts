@@ -56,9 +56,6 @@ export const servicePaths = {
   compatibility(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/settings/compatibility`;
   },
-  cacheSettings(baseUrl: string): string {
-    return `${serviceBase(baseUrl)}/settings/cache`;
-  },
   release(baseUrl: string): string {
     return `${serviceBase(baseUrl)}/release`;
   },

@@ -91,37 +91,41 @@ function sanitizeAnthropicNativeValue(value: unknown): unknown {
 function sanitizeAnthropicNativeMessages(messages: unknown): AnthropicMessage[] {
   if (!Array.isArray(messages)) return [];
 
-  return messages
-    .map((message) => {
-      if (!message || typeof message !== "object") return null;
-      const entry = message as Record<string, unknown>;
-      const role = entry.role === "assistant" ? "assistant" : "user";
-      const content = entry.content;
+  const result: AnthropicMessage[] = [];
 
-      if (typeof content === "string") {
-        return { role, content };
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const entry = message as Record<string, unknown>;
+    const role = entry.role === "assistant" ? "assistant" : "user";
+    const content = entry.content;
+
+    if (typeof content === "string") {
+      result.push({ role, content });
+      continue;
+    }
+
+    if (!Array.isArray(content)) {
+      result.push({ role, content: "" });
+      continue;
+    }
+
+    const filteredContent = content.filter((part) => {
+      if (!part || typeof part !== "object") return false;
+      const item = part as Record<string, unknown>;
+      const type = typeof item.type === "string" ? item.type : "";
+      if ((type === "thinking" || type === "redacted_thinking") && typeof item.signature !== "string") {
+        return false;
       }
+      return true;
+    }) as AnthropicContentPart[];
 
-      if (!Array.isArray(content)) {
-        return { role, content: "" };
-      }
+    result.push({
+      role,
+      content: filteredContent,
+    });
+  }
 
-      const filteredContent = content.filter((part) => {
-        if (!part || typeof part !== "object") return false;
-        const item = part as Record<string, unknown>;
-        const type = typeof item.type === "string" ? item.type : "";
-        if ((type === "thinking" || type === "redacted_thinking") && typeof item.signature !== "string") {
-          return false;
-        }
-        return true;
-      }) as AnthropicContentPart[];
-
-      return {
-        role,
-        content: filteredContent,
-      };
-    })
-    .filter((message): message is AnthropicMessage => message !== null);
+  return result;
 }
 
 function convertContentForClaude(content: string | OAIContentPart[] | null | undefined): string | AnthropicContentPart[] {
@@ -368,13 +372,13 @@ export async function handleClaude(args: {
 
   let result: Anthropic.Message;
   try {
-    result = await client.messages.create(buildCreateParams() as Parameters<typeof client.messages.create>[0]);
+    result = await client.messages.create(buildCreateParams() as Parameters<typeof client.messages.create>[0]) as Anthropic.Message;
   } catch (nonStreamErr: unknown) {
     const errMsg = nonStreamErr instanceof Error ? nonStreamErr.message : String(nonStreamErr);
     if (/streaming.*required|requires.*stream/i.test(errMsg)) {
       req.log.warn("Claude model requires streaming — upgrading to stream+collect for non-stream request");
       const claudeStream = client.messages.stream(buildCreateParams() as Parameters<typeof client.messages.stream>[0]);
-      result = await claudeStream.finalMessage();
+      result = await claudeStream.finalMessage() as Anthropic.Message;
     } else {
       throw nonStreamErr;
     }

@@ -31,6 +31,10 @@ export function createAdminRouter(deps: {
 }): IRouter {
   const router = Router();
 
+  function firstParam(value: string | string[] | undefined): string {
+    return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  }
+
   function sendMetrics(_req: Request, res: Response) {
     const allConfigs = getAllFriendProxyConfigs();
     const allLabels = ["local", ...allConfigs.map((config) => config.label)];
@@ -106,7 +110,7 @@ export function createAdminRouter(deps: {
   }
 
   function deleteBackend(req: Request, res: Response) {
-    const { label } = req.params;
+    const label = firstParam(req.params.label);
     if (!deleteDynamicBackend(label)) {
       res.status(404).json({ error: "Dynamic backend not found" });
       return;
@@ -116,7 +120,7 @@ export function createAdminRouter(deps: {
   }
 
   function updateBackend(req: Request, res: Response) {
-    const { label } = req.params;
+    const label = firstParam(req.params.label);
     const body = parseRequestBody(res, updateBackendBodySchema, req.body);
     if (!body) return;
     const { enabled } = body;
