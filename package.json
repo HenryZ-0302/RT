@@ -6,7 +6,9 @@
   "scripts": {
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "verify:install": "node scripts/verify-install.mjs"
+    "verify:install": "node scripts/verify-install.mjs",
+    "verify:model-prompt": "node scripts/verify-model-prompt.mjs",
+    "verify": "node scripts/verify-install.mjs && node scripts/verify-model-prompt.mjs"
   },
   "devDependencies": {
     "typescript": "~5.9.2"

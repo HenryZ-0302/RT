@@ -14,13 +14,14 @@ For a fresh Replit install or re-initialization:
 
 1. Sync the repository files into the workspace.
 2. Run `pnpm install`.
-3. Start:
+3. Run `pnpm run verify:install`.
+4. Start:
    - `API Server`
    - `API Portal`
-4. Verify:
+5. Verify:
    - server listens on `8080`
    - portal serves on `3000`
-   - `/api/service/status` returns `200`
+   - `/api/healthz` returns `200`
 
 Full instructions live in [docs/INSTALL.md](docs/INSTALL.md).
 
