@@ -7,6 +7,12 @@ import { chatCompletionBodySchema } from "../schemas/chat";
 import { type Backend } from "../services/backendPool";
 import { type RequestLog } from "../services/requestLogs";
 import { type RegisteredProvider } from "../services/modelRegistry";
+import {
+  createChatResponseCacheKey,
+  getCachedChatResponse,
+  setCachedChatResponse,
+  type ResponseCacheSettings,
+} from "../services/responseCache";
 import { type FriendProxyHttpError } from "../services/routeSupport";
 
 type OAIContentPart =
@@ -34,6 +40,43 @@ type OAIMessage =
 
 type PushRequestLog = (entry: Omit<RequestLog, "id" | "time">) => void;
 
+function isPlainTextCacheableChat(args: {
+  stream: boolean;
+  messages: OAIMessage[];
+  tools?: OAITool[];
+  toolChoice?: unknown;
+}): boolean {
+  if (args.stream) return false;
+  if (args.tools?.length) return false;
+  if (args.toolChoice !== undefined) return false;
+
+  return args.messages.every((message) => {
+    if ("tool_calls" in message && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return false;
+    if ("tool_call_id" in message && typeof message.tool_call_id === "string") return false;
+    return typeof message.content === "string";
+  });
+}
+
+function captureJsonResponse(res: Response): {
+  getBody: () => unknown | undefined;
+  restore: () => void;
+} {
+  const originalJson = res.json.bind(res);
+  let capturedBody: unknown;
+
+  res.json = ((body: unknown) => {
+    capturedBody = body;
+    return originalJson(body);
+  }) as Response["json"];
+
+  return {
+    getBody: () => capturedBody,
+    restore: () => {
+      res.json = originalJson as Response["json"];
+    },
+  };
+}
+
 export function createChatRouter(deps: {
   pickBackend: () => Backend | null;
   pickBackendExcluding: (exclude: Set<string>) => Backend | null;
@@ -43,6 +86,7 @@ export function createChatRouter(deps: {
   isChatModel: (id: string | undefined) => boolean;
   isImageModel: (id: string | undefined) => boolean;
   isModelEnabled: (id: string) => boolean;
+  getResponseCacheSettings: () => ResponseCacheSettings;
   resolveClaudeThinkingModel: (model: string, requestedMaxTokens?: number) => {
     actualModel: string;
     thinkingEnabled: boolean;
@@ -153,6 +197,44 @@ export function createChatRouter(deps: {
     const finalMessages = (isClaudeModel && deps.getSillyTavernMode() && !tools?.length)
       ? [...messages, { role: "user" as const, content: "继续" }]
       : messages;
+    const cacheSettings = deps.getResponseCacheSettings();
+    const cacheKey = cacheSettings.enabled && isPlainTextCacheableChat({
+      stream: shouldStream,
+      messages: finalMessages,
+      tools,
+      toolChoice: tool_choice,
+    })
+      ? createChatResponseCacheKey({
+          model: selectedModel,
+          messages: finalMessages,
+          maxTokens: max_tokens,
+        })
+      : null;
+
+    if (cacheKey) {
+      const cached = getCachedChatResponse(cacheKey);
+      if (cached) {
+        const duration = Date.now() - startTime;
+        res.setHeader("X-RT-Cache", "HIT");
+        res.json(cached.body);
+        deps.recordCallStat("cache", duration, 0, 0, undefined, selectedModel);
+        deps.pushRequestLog({
+          method: req.method,
+          path: req.path,
+          model: selectedModel,
+          backend: "cache",
+          status: 200,
+          duration,
+          stream: false,
+          promptTokens: 0,
+          completionTokens: 0,
+          level: "info",
+        });
+        return;
+      }
+
+      res.setHeader("X-RT-Cache", "MISS");
+    }
 
     const MAX_FRIEND_RETRIES = 3;
     const triedFriendUrls = new Set<string>();
@@ -173,7 +255,9 @@ export function createChatRouter(deps: {
         toolCount: tools?.length ?? 0,
       }, "Service request");
 
+      let jsonCapture: ReturnType<typeof captureJsonResponse> | null = null;
       try {
+        if (cacheKey) jsonCapture = captureJsonResponse(res);
         let result: { promptTokens: number; completionTokens: number; ttftMs?: number };
         if (backend.kind === "friend") {
           triedFriendUrls.add(backend.url);
@@ -251,6 +335,17 @@ export function createChatRouter(deps: {
           });
         }
 
+        const cachedBody = jsonCapture?.getBody();
+        jsonCapture?.restore();
+        jsonCapture = null;
+        if (cacheKey && cachedBody !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
+          setCachedChatResponse(cacheSettings, cacheKey, {
+            body: cachedBody,
+            promptTokens: result.promptTokens,
+            completionTokens: result.completionTokens,
+          });
+        }
+
         if (backend.kind === "friend") deps.setHealth(backend.url, true);
         const duration = Date.now() - startTime;
         deps.recordCallStat(backendLabel, duration, result.promptTokens, result.completionTokens, result.ttftMs, selectedModel);
@@ -268,6 +363,7 @@ export function createChatRouter(deps: {
         });
         break;
       } catch (err: unknown) {
+        jsonCapture?.restore();
         deps.recordErrorStat(backendLabel);
 
         const is5xx = deps.isFriendProxyHttpError(err) && err.status >= 500;

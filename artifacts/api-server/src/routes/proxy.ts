@@ -31,7 +31,7 @@ import {
 import { pushRequestLog } from "../services/requestLogs";
 import { FriendProxyHttpError, HttpStatusError, setSseHeaders, writeAndFlush } from "../services/routeSupport";
 import { createStatsTracker } from "../services/stats";
-import { getSillyTavernMode } from "./settings";
+import { getResponseCacheSettings, getSillyTavernMode } from "./settings";
 
 const router: IRouter = Router();
 router.use(catalogRouter);
@@ -370,6 +370,7 @@ router.use(createChatRouter({
   isChatModel,
   isImageModel,
   isModelEnabled,
+  getResponseCacheSettings,
   resolveClaudeThinkingModel,
   getSillyTavernMode,
   makeLocalAnthropic,

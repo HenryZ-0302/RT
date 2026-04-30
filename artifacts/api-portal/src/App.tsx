@@ -18,6 +18,7 @@ type BackendStat = { calls: number; errors: number; streamingCalls: number; prom
 type ModelStat = { calls: number; promptTokens: number; completionTokens: number; capability?: "chat" | "image" };
 interface ModelStatus { id: string; description?: string; provider: string; group: string; capability: "chat" | "image"; testMode: "chat" | "image"; enabled: boolean }
 type GroupSummary = { total: number; enabled: number };
+type ResponseCacheSettings = { enabled: boolean; ttlSeconds: number; entries: number; maxEntries: number };
 type MetricsResponse = {
   stats?: Record<string, Record<string, unknown>>;
   modelStats?: Record<string, ModelStat>;
@@ -29,6 +30,13 @@ export default function App() {
   const [online, setOnline] = useState<boolean | null>(null);
   const [sillyTavernMode, setSillyTavernMode] = useState(false);
   const [stLoading, setStLoading] = useState(false);
+  const [cacheLoading, setCacheLoading] = useState(false);
+  const [cacheSettings, setCacheSettings] = useState<ResponseCacheSettings>({
+    enabled: false,
+    ttlSeconds: 3600,
+    entries: 0,
+    maxEntries: 200,
+  });
   const [apiKey, setApiKey] = useState(() => getStoredServiceKey());
   const [gateKey, setGateKey] = useState(() => getStoredServiceKey());
   const [gateReady, setGateReady] = useState(false);
@@ -104,6 +112,55 @@ export default function App() {
       if (!res.ok) setSillyTavernMode(!newVal);
     } catch { setSillyTavernMode(!newVal); }
   };
+
+  const fetchCacheSettings = useCallback(async (key: string) => {
+    const trimmed = key.trim();
+    if (!trimmed) return;
+
+    setCacheLoading(true);
+    try {
+      const res = await fetch(servicePaths.cacheSettings(baseUrl), {
+        headers: { Authorization: `Bearer ${trimmed}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as ResponseCacheSettings;
+        setCacheSettings({
+          enabled: Boolean(data.enabled),
+          ttlSeconds: Number(data.ttlSeconds) || 3600,
+          entries: Number(data.entries) || 0,
+          maxEntries: Number(data.maxEntries) || 200,
+        });
+      }
+    } catch {}
+    finally {
+      setCacheLoading(false);
+    }
+  }, [baseUrl]);
+
+  const updateCacheSettings = useCallback(async (patch: Partial<ResponseCacheSettings> & { clear?: boolean }) => {
+    if (!apiKey) return;
+
+    setCacheLoading(true);
+    try {
+      const res = await fetch(servicePaths.cacheSettings(baseUrl), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        const data = await res.json() as ResponseCacheSettings;
+        setCacheSettings({
+          enabled: Boolean(data.enabled),
+          ttlSeconds: Number(data.ttlSeconds) || 3600,
+          entries: Number(data.entries) || 0,
+          maxEntries: Number(data.maxEntries) || 200,
+        });
+      }
+    } catch {}
+    finally {
+      setCacheLoading(false);
+    }
+  }, [apiKey, baseUrl]);
 
   const verifyServiceKey = useCallback(async (candidate: string) => {
     const trimmed = candidate.trim();
@@ -338,7 +395,8 @@ export default function App() {
   useEffect(() => {
     if (!gateUnlocked || !apiKey) return;
     void fetchSTMode(apiKey);
-  }, [apiKey, fetchSTMode, gateUnlocked]);
+    void fetchCacheSettings(apiKey);
+  }, [apiKey, fetchCacheSettings, fetchSTMode, gateUnlocked]);
   useEffect(() => {
     if (!gateUnlocked) return;
     fetchModels(apiKey);
@@ -508,6 +566,9 @@ export default function App() {
                 sillyTavernMode={sillyTavernMode}
                 stLoading={stLoading}
                 onToggleSTMode={toggleSTMode}
+                cacheSettings={cacheSettings}
+                cacheLoading={cacheLoading}
+                onUpdateCacheSettings={updateCacheSettings}
               />
             </Route>
           </Switch>
